@@ -2,88 +2,99 @@
  * @NApiVersion 2.1
  * @NScriptType ClientScript
  */
-define(['N/currentRecord', 'N/url'], (currentRecord, url) => {
+define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
 
-    const COS_UI = {};
+    const FIELD_SPECIES = 'custrecord_cos_rep_species';
 
-    let COS_MODAL_OVERLAY_ID = 'cos_parent_modal_overlay';
+    function pushItemsToInlineHtml(items, speciesId) {
+        const meta = { speciesId: speciesId || '' };
 
-    function lockParentUI() {
-        if (document.getElementById(COS_MODAL_OVERLAY_ID)) return;
-
-        const overlay = document.createElement('div');
-        overlay.id = COS_MODAL_OVERLAY_ID;
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100vw';
-        overlay.style.height = '100vh';
-        overlay.style.background = 'rgba(0,0,0,0.25)';
-        overlay.style.zIndex = '999999';
-        overlay.style.cursor = 'not-allowed';
-
-        overlay.innerHTML = '<div style="color:#fff;font-size:16px;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);">Complete the popup to continue</div>';
-
-        document.body.appendChild(overlay);
-        document.body.style.overflow = 'hidden';
-    }
-
-    function unlockParentUI() {
-        const overlay = document.getElementById(COS_MODAL_OVERLAY_ID);
-        if (overlay) overlay.remove();
-        document.body.style.overflow = '';
-    }
-
-    COS_UI.openInputPopup = (context) => {
-        const suiteletUrl = url.resolveScript({
-            scriptId: 'customscript_cos_repack_popup_sl',
-            deploymentId: 'customdeploy_cos_repack_popup_sl',
-            params: {
-                mode: 'input',
-                itemId: context.itemId || '',
-                itemText: context.itemText || ''
+        const tryPush = (attempt) => {
+            const a = attempt || 0;
+            try {
+                if (window.COS_REPACK_UI && typeof window.COS_REPACK_UI.setItems === 'function') {
+                    window.COS_REPACK_UI.setItems(items, meta);
+                    return;
+                }
+            } catch (e) {
+                // ignore and retry
             }
+
+            // INLINEHTML can load slightly after client script in NetSuite
+            if (a < 25) {
+                setTimeout(() => tryPush(a + 1), 200);
+            }
+        };
+
+        tryPush(0);
+    }
+
+    function fetchItemsBySpecies(speciesId) {
+        if (!speciesId) return [];
+
+        const items = [];
+
+        const s = search.create({
+            type: search.Type.ITEM,
+            filters: [
+                ['isinactive', 'is', 'F'],
+                'AND',
+                ['custitem_repack_species', 'anyof', speciesId]
+            ],
+            columns: [
+                search.createColumn({ name: 'internalid' }),
+                search.createColumn({ name: 'itemid' })
+            ]
         });
 
-        lockParentUI();
+        const paged = s.runPaged({ pageSize: 1000 });
+        paged.pageRanges.forEach((range) => {
+            const page = paged.fetch({ index: range.index });
+            page.data.forEach((r) => {
+                const id = r.getValue({ name: 'internalid' });
+                const name = r.getValue({ name: 'itemid' });
+                if (id) {
+                    items.push({ id: String(id), name: String(name || id) });
+                }
+            });
+        });
 
-        const popup = window.open(
-            suiteletUrl,
-            'cos_repack_popup',
-            'width=1200,height=760,resizable=yes,scrollbars=yes'
-        );
+        return items;
+    }
 
-        // Safety: if popup is blocked or closed manually
-        const watcher = setInterval(() => {
-            if (!popup || popup.closed) {
-                clearInterval(watcher);
-                unlockParentUI();
-            }
-        }, 500);
-
-        popup.focus();
-    };
-
-    COS_UI.receivePopupPayload = (payload) => {
+    function refreshItems() {
         try {
             const rec = currentRecord.get();
+            const speciesId = rec.getValue({ fieldId: FIELD_SPECIES });
 
-            rec.setValue({
-                fieldId: 'custpage_cos_popup_payload',
-                value: JSON.stringify(payload || {})
-            });
+            if (!speciesId) {
+                pushItemsToInlineHtml([], '');
+                return;
+            }
 
-            unlockParentUI();   // ✅ unlock parent here
-
-            console.log('Popup payload stored:', payload);
+            const items = fetchItemsBySpecies(speciesId);
+            pushItemsToInlineHtml(items, String(speciesId));
         } catch (e) {
-            unlockParentUI();
-            console.error(e);
+            // If something goes wrong, still push empty so UI doesn't hang
+            pushItemsToInlineHtml([], '');
+            try {
+                console.error('COS_CS refreshItems error', e);
+            } catch (ignore) {}
         }
+    }
+
+    function pageInit() {
+        refreshItems();
+    }
+
+    function fieldChanged(context) {
+        if (context && context.fieldId === FIELD_SPECIES) {
+            refreshItems();
+        }
+    }
+
+    return {
+        pageInit,
+        fieldChanged
     };
-
-    // Expose to INLINEHTML + popup
-    window.COS_UI = COS_UI;
-
-    return {};
 });
