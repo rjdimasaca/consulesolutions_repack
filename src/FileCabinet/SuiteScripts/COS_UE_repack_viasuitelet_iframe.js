@@ -488,7 +488,51 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
     updateStepButtons();
   }
 
-  function showStep2(){
+  
+  function resetStep2And3(){
+    // Clear inputs and any UI built from them
+    inputsSelected = {};
+    inputsPrepared = false;
+
+    // Clear step2 input search box and rows
+    try {
+      var inSearch = byId('cos_in_search');
+      if (inSearch) inSearch.value = '';
+    } catch(e) {}
+
+    try {
+      var inRows = byId('cos_in_rows');
+      if (inRows) inRows.innerHTML = '';
+    } catch(e) {}
+
+    // Hide step2 container until shown again
+    try {
+      var step2 = byId('cos_step2_wrap');
+      if (step2) step2.style.display = 'none';
+    } catch(e) {}
+
+    // Clear summary UI (step3)
+    try {
+      var sumBody = byId('cos_summary_body');
+      if (sumBody) sumBody.innerHTML = '';
+    } catch(e) {}
+
+    try {
+      var sumSection = byId('cos_summary_section');
+      if (sumSection) sumSection.style.display = 'none';
+    } catch(e) {}
+
+    try {
+      var sumHint = byId('cos_summary_hint');
+      if (sumHint) sumHint.textContent = 'Prepare inputs first.';
+    } catch(e) {}
+
+    // Update buttons/hidden fields
+    updateStepButtons();
+    syncHidden();
+  }
+
+function showStep2(){
     var wrap = byId('cos_step2_wrap');
     if (wrap) wrap.style.display = 'block';
     inputsPrepared = true;
@@ -563,6 +607,7 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
     if (btnPrep && !btnPrep._cosBound) {
       btnPrep._cosBound = true;
       btnPrep.addEventListener('click', function(){
+        resetStep2And3();
         showStep2();
         // Scroll to step2
         try { byId('cos_in_section').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(e) {}
