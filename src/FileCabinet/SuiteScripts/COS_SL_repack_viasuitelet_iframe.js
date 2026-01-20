@@ -1,34 +1,73 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Suitelet
- *
- * IFRAME MODAL VERSION
- * - This Suitelet is intended to be loaded inside an <iframe> shown in a parent User Event INLINEHTML modal.
- * - On OK, it posts a message to the parent window:
- *     window.parent.postMessage({ type: 'COS_REPACK_MODAL_SUBMIT', payload: {...} }, '*');
- * - On Close, it posts a close request:
- *     window.parent.postMessage({ type: 'COS_REPACK_MODAL_CLOSE' }, '*');
  */
-define([], () => {
+define(['N/search'], (search) => {
 
     const onRequest = (context) => {
         const req = context.request;
         const res = context.response;
 
-        const mode = (req.parameters.mode || 'input').toLowerCase();
         const itemId = req.parameters.itemId || '';
         const itemText = req.parameters.itemText || '';
 
-        // Mock output rows (replace later with real search data)
-        const outputRows = [
-            { id: 'CHEM-GA50',   text: 'CHEM-GA50',   suggested: '0 lb', onhand: '5,141.008 lb', available: '3,259.139 lb', committed: '1,881.868 lb', onorder: '0 lb',  uom: 'lb' },
-            { id: 'CHEM-GA50-P', text: 'CHEM-GA50-P', suggested: '0 ea', onhand: '11 ea',        available: '11 ea',        committed: '0 ea',        onorder: '30 ea', uom: 'ea' },
-            { id: 'CHEM-GA50-D', text: 'CHEM-GA50-D', suggested: '0 ea', onhand: '13 ea',        available: '13 ea',        committed: '0 ea',        onorder: '1 ea',  uom: 'ea' },
-            { id: 'CHEM-GA50-T', text: 'CHEM-GA50-T', suggested: '0 ea', onhand: '5.018 ea',     available: '5.018 ea',     committed: '0 ea',        onorder: '0 ea',  uom: 'ea' }
-        ];
+        if (!itemId) {
+            res.write(buildErrorHtml('Missing required parameter: itemId'));
+            return;
+        }
 
-        res.write(buildHtml({ mode, itemId, itemText, outputRows }));
+        // Fetch lot rows (lot internalid + lot text + available qty)
+        const lots = getLotsForItem(itemId);
+
+        res.write(buildHtml({
+            itemId,
+            itemText,
+            lots
+        }));
     };
+
+    function getLotsForItem(itemId) {
+        const rows = [];
+
+        // Inventory Balance is the simplest place to get:
+        // - inventorynumber (lot/serial)
+        // - available
+        //
+        // NOTE: Column IDs can vary by account/features; this is the standard approach.
+        // If your account uses inventory status, you can also add status filtering/columns later.
+        const s = search.create({
+            type: 'inventorybalance',
+            filters: [
+                ['item', 'anyof', itemId],
+                'AND',
+                ['inventorynumber', 'noneof', '@NONE@'],
+                'AND',
+                ['available', 'greaterthan', '0']
+            ],
+            columns: [
+                search.createColumn({ name: 'inventorynumber' }),
+                search.createColumn({ name: 'available' })
+            ]
+        });
+
+        s.run().each((r) => {
+            const lotId = r.getValue({ name: 'inventorynumber' });
+            const lotText = r.getText({ name: 'inventorynumber' }) || '';
+            const available = r.getValue({ name: 'available' });
+
+            // Sometimes inventorybalance returns multiple rows per lot (e.g. location/status);
+            // For now we just list rows as-is. Later we can aggregate by lotId if needed.
+            rows.push({
+                lotId: String(lotId || ''),
+                lotText: String(lotText || ''),
+                available: String(available || '0')
+            });
+
+            return true;
+        });
+
+        return rows;
+    }
 
     function escapeHtml(s) {
         return String(s ?? '').replace(/[&<>"']/g, (c) => ({
@@ -36,206 +75,178 @@ define([], () => {
         }[c]));
     }
 
-    function buildHtml({ mode, itemId, itemText, outputRows }) {
-        const safeMode = escapeHtml(mode);
-        const safeItemText = escapeHtml(itemText || '—');
-
-        const rowsHtml = outputRows.map((r) => `
-      <div class="gridRow">
-        <div>${escapeHtml(r.text)}</div>
-        <div>${escapeHtml(r.suggested)}</div>
-        <div>${escapeHtml(r.onhand)}</div>
-        <div>${escapeHtml(r.available)}</div>
-        <div>${escapeHtml(r.committed)}</div>
-        <div>${escapeHtml(r.onorder)}</div>
-        <div class="qtyCell">
-          <input class="qtyInput" type="text" data-outputid="${escapeHtml(r.id)}" placeholder="0" />
-          <span class="uom">${escapeHtml(r.uom)}</span>
-        </div>
-      </div>
-    `).join('');
-
-        return `
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <title>${safeMode === 'output' ? 'Output' : 'Input'}</title>
-  <style>
-    body { margin:0; font-family: Arial, sans-serif; background:#fff; }
-    .section { padding:10px 12px; border-bottom:1px solid #ddd; }
-    .sectionTitle { font-weight:bold; margin-bottom:6px; }
-    .inputLayout { display:flex; gap:16px; justify-content:space-between; align-items:flex-start; }
-    .kv { display:grid; grid-template-columns:70px 1fr; gap:4px 10px; font-size:12px; }
-    .k { color:#666; }
-    .v { color:#111; }
-    .qtyBox { min-width:320px; }
-    .qtyRow { display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
-    .qtyRowLabel { font-size:12px; color:#666; }
-    .qtyRowRight { display:flex; gap:8px; align-items:center; }
-    .qtyMain { padding:6px; width:180px; }
-
-    .subHeader { padding:10px 12px; background:#f1f3f6; border-bottom:1px solid #ddd; font-weight:bold; }
-    .tools { padding:8px 12px; border-bottom:1px solid #ddd; background:#fafafa; display:flex; gap:6px; }
-    .tools button { padding:4px 8px; cursor:pointer; }
-
-    .gridHeader, .gridRow {
-      display:grid;
-      grid-template-columns: 2.2fr 1fr 1fr 1fr 1fr 1fr 1.2fr;
-      padding:8px 12px;
-      font-size:12px;
-      align-items:center;
+    function buildErrorHtml(msg) {
+        return (
+            '<!doctype html><html><head><meta charset="utf-8"/>' +
+            '<title>Select Lots</title>' +
+            '<style>body{font-family:Arial,sans-serif;padding:16px;}</style>' +
+            '</head><body>' +
+            '<h3>Error</h3>' +
+            '<div style="color:#b00;">' + escapeHtml(msg) + '</div>' +
+            '</body></html>'
+        );
     }
-    .gridHeader {
-      font-weight:bold; background:#eee; border-bottom:1px solid #ddd;
-      position:sticky; top:0;
-    }
-    .gridRow { border-bottom:1px solid #eee; }
-    .qtyCell { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
-    .qtyInput { padding:6px; width:140px; }
-    .uom { color:#666; }
 
-    /* Footer buttons */
-    .footer {
-      padding:10px 12px; border-top:1px solid #ddd; background:#f7f7f7;
-      display:flex; gap:8px;
-      position:sticky; bottom:0;
-    }
-    .footer button { padding:6px 14px; cursor:pointer; }
+    function buildHtml(opts) {
+        const itemId = opts.itemId;
+        const itemText = opts.itemText;
+        const lots = Array.isArray(opts.lots) ? opts.lots : [];
 
-    /* Scroll container inside iframe (so parent modal can be fixed height) */
-    .scrollArea { height: calc(100vh - 120px - 44px); overflow:auto; }
-  </style>
-</head>
-<body>
+        let rowsHtml = '';
+        for (let i = 0; i < lots.length; i++) {
+            const lot = lots[i];
 
-  <div class="section">
-    <div class="sectionTitle">${safeMode === 'output' ? 'Output' : 'Input'}</div>
+            rowsHtml +=
+                '<tr>' +
+                '<td style="text-align:center;">' +
+                '<input type="checkbox" class="lot_cb" data-lotid="' + escapeHtml(lot.lotId) + '" />' +
+                '</td>' +
+                '<td>' + escapeHtml(lot.lotId) + '</td>' +
+                '<td>' + escapeHtml(lot.lotText) + '</td>' +
+                '<td style="text-align:right;">' + escapeHtml(lot.available) + '</td>' +
+                '<td style="text-align:right;">' +
+                '<input type="text" class="lot_qty" data-lotid="' + escapeHtml(lot.lotId) + '" style="width:110px;" disabled />' +
+                '</td>' +
+                '</tr>';
+        }
 
-    <div class="inputLayout">
-      <div class="kv">
-        <div class="k">${safeMode === 'output' ? 'OUTPUT' : 'INPUT'}</div>
-        <div class="v" id="inputItemText">${safeItemText}</div>
+        const emptyHtml =
+            '<div style="padding:10px;color:#666;font-size:12px;">No available lots found for this item.</div>';
 
-        <div class="k">LOT</div>
-        <div class="v" id="inputLot">Nov 8 2025</div>
+        return (
+            '<!doctype html>' +
+            '<html>' +
+            '<head>' +
+            '<meta charset="utf-8"/>' +
+            '<title>Select Lots</title>' +
+            '<style>' +
+            'body{margin:0;font-family:Arial,sans-serif;background:#fff;}' +
+            '.header{padding:10px 12px;border-bottom:1px solid #ddd;background:#f7f7f7;}' +
+            '.title{font-weight:bold;font-size:14px;}' +
+            '.sub{font-size:12px;color:#666;margin-top:2px;}' +
+            '.wrap{padding:12px;}' +
+            'table{width:100%;border-collapse:collapse;font-size:12px;}' +
+            'th,td{border-bottom:1px solid #eee;padding:8px 10px;}' +
+            'th{background:#eee;text-align:left;font-weight:bold;}' +
+            '.footer{position:sticky;bottom:0;background:#f7f7f7;border-top:1px solid #ddd;padding:10px 12px;display:flex;gap:8px;}' +
+            'button{padding:6px 14px;cursor:pointer;}' +
+            '</style>' +
+            '</head>' +
+            '<body>' +
 
-        <div class="k">STATUS</div>
-        <div class="v" id="inputStatus">Good</div>
-      </div>
+            '<div class="header">' +
+            '<div class="title">Select Lots</div>' +
+            '<div class="sub">Item: ' + escapeHtml(itemText || itemId) + '</div>' +
+            '</div>' +
 
-      <div class="qtyBox">
-        <div class="qtyRow" style="margin-top:0;">
-          <div class="qtyRowLabel">AVAILABLE</div>
-          <div class="v" id="inputAvailable">341.0077 lb</div>
-        </div>
+            '<div class="wrap">' +
 
-        <div class="qtyRow">
-          <div class="qtyRowLabel">QUANTITY</div>
-          <div class="qtyRowRight">
-            <input id="inputQty" class="qtyMain" type="text" value="341.0077" />
-            <span id="inputUom" class="uom">lb</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+            (lots.length
+                    ? (
+                        '<table>' +
+                        '<thead>' +
+                        '<tr>' +
+                        '<th style="width:40px;"></th>' +
+                        '<th style="width:160px;">Lot Internal ID</th>' +
+                        '<th>Lot Number</th>' +
+                        '<th style="width:160px;text-align:right;">Available</th>' +
+                        '<th style="width:160px;text-align:right;">Qty to Use</th>' +
+                        '</tr>' +
+                        '</thead>' +
+                        '<tbody>' + rowsHtml + '</tbody>' +
+                        '</table>'
+                    )
+                    : emptyHtml
+            ) +
 
-  <div class="subHeader">Select Outputs</div>
+            '</div>' +
 
-  <div class="tools">
-    <button id="btnExpandAll" type="button">Expand all</button>
-    <button id="btnCustomize" type="button">Customize</button>
-  </div>
+            '<div class="footer">' +
+            '<button id="btnOk" type="button">OK</button>' +
+            '<button id="btnClose" type="button">Close</button>' +
+            '</div>' +
 
-  <div class="scrollArea" id="scrollArea">
-    <div class="gridHeader">
-      <div>Item</div>
-      <div>Suggested Output</div>
-      <div>On Hand</div>
-      <div>Available</div>
-      <div>Committed</div>
-      <div>On Order</div>
-      <div>Quantity</div>
-    </div>
-    ${rowsHtml}
-  </div>
+            '<script>' +
+            '(function(){' +
+            'var ITEM_ID = ' + JSON.stringify(itemId) + ';' +
+            'var ITEM_TEXT = ' + JSON.stringify(itemText) + ';' +
 
-  <div class="footer">
-    <button id="btnOk" type="button">OK</button>
-    <button id="btnClose" type="button">Close</button>
-  </div>
+            'function postClose(){' +
+            'window.parent.postMessage({ type: "COS_REPACK_MODAL_CLOSE" }, "*");' +
+            '}' +
 
-  <script>
-    (function () {
-      var MODE = ${JSON.stringify(mode)};
-      var ITEM_ID = ${JSON.stringify(itemId)};
-      var ITEM_TEXT = ${JSON.stringify(itemText)};
+            'function gather(){' +
+            'var out = [];' +
+            'var cbs = document.querySelectorAll("input.lot_cb");' +
+            'for(var i=0;i<cbs.length;i++){' +
+            'var cb = cbs[i];' +
+            'if(!cb.checked) continue;' +
+            'var lotId = cb.getAttribute("data-lotid") || "";' +
+            'var qtyEl = document.querySelector("input.lot_qty[data-lotid=\\"" + lotId + "\\"]");' +
+            'var qty = qtyEl ? qtyEl.value : "";' +
+            'var tr = cb.closest("tr");' +
+            'var lotText = "";' +
+            'var available = "";' +
+            'if(tr){' +
+            'var tds = tr.querySelectorAll("td");' +
+            'if(tds && tds.length >= 4){' +
+            'lotText = (tds[2] && tds[2].textContent) ? tds[2].textContent.trim() : "";' +
+            'available = (tds[3] && tds[3].textContent) ? tds[3].textContent.trim() : "";' +
+            '}' +
+            '}' +
+            'out.push({ lotId: lotId, lotText: lotText, available: available, qty: qty });' +
+            '}' +
+            'return out;' +
+            '}' +
 
-      function gatherPayload() {
-        var inputQtyEl = document.getElementById('inputQty');
-        var inputQty = inputQtyEl ? inputQtyEl.value : '';
+            'function postSubmit(){' +
+            'var lots = gather();' +
+            'window.parent.postMessage({' +
+            'type: "COS_REPACK_MODAL_SUBMIT",' +
+            'payload: {' +
+            'itemId: ITEM_ID,' +
+            'itemText: ITEM_TEXT,' +
+            'lots: lots' +
+            '}' +
+            '}, "*");' +
+            '}' +
 
-        var outputs = Array.prototype.slice.call(document.querySelectorAll('input.qtyInput[data-outputid]'))
-          .map(function (inp) {
-            return { outputId: inp.getAttribute('data-outputid'), qty: inp.value };
-          })
-          .filter(function (x) {
-            return x.qty && String(x.qty).trim() !== '';
-          });
+            // Enable qty field when checkbox selected
+            'var cbs = document.querySelectorAll("input.lot_cb");' +
+            'for(var i=0;i<cbs.length;i++){' +
+            '(function(cb){' +
+            'cb.addEventListener("change", function(){' +
+            'var lotId = cb.getAttribute("data-lotid") || "";' +
+            'var qtyEl = document.querySelector("input.lot_qty[data-lotid=\\"" + lotId + "\\"]");' +
+            'if(!qtyEl) return;' +
+            'qtyEl.disabled = !cb.checked;' +
+            'if(cb.checked && !qtyEl.value){' +
+            // default qty to available if you want; leaving blank is also fine.
+            'var tr = cb.closest("tr");' +
+            'if(tr){' +
+            'var tds = tr.querySelectorAll("td");' +
+            'var avail = (tds && tds[3] && tds[3].textContent) ? tds[3].textContent.trim() : "";' +
+            'qtyEl.value = avail;' +
+            '}' +
+            '}' +
+            'if(!cb.checked){ qtyEl.value = ""; }' +
+            '});' +
+            '})(cbs[i]);' +
+            '}' +
 
-        return {
-          mode: MODE,
-          input: {
-            itemId: ITEM_ID,
-            itemText: ITEM_TEXT,
-            qty: inputQty,
-            lotText: (document.getElementById('inputLot') || {}).textContent || '',
-            statusText: (document.getElementById('inputStatus') || {}).textContent || '',
-            availableText: (document.getElementById('inputAvailable') || {}).textContent || '',
-            uomText: (document.getElementById('inputUom') || {}).textContent || ''
-          },
-          outputs: outputs
-        };
-      }
+            'var ok = document.getElementById("btnOk");' +
+            'var close = document.getElementById("btnClose");' +
+            'if(ok) ok.addEventListener("click", postSubmit);' +
+            'if(close) close.addEventListener("click", postClose);' +
+            'document.addEventListener("keydown", function(e){ if(e.key==="Escape"){ postClose(); } });' +
+            '})();' +
+            '</script>' +
 
-      function postSubmit(payload) {
-        // Parent UE listens for type 'COS_REPACK_MODAL_SUBMIT'
-        window.parent.postMessage({ type: 'COS_REPACK_MODAL_SUBMIT', payload: payload }, '*');
-      }
-
-      function postClose() {
-        // Optional: parent may also listen for explicit close
-        window.parent.postMessage({ type: 'COS_REPACK_MODAL_CLOSE' }, '*');
-      }
-
-      document.getElementById('btnOk').addEventListener('click', function () {
-        var payload = gatherPayload();
-        postSubmit(payload);
-      });
-
-      document.getElementById('btnClose').addEventListener('click', function () {
-        postClose();
-      });
-
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') postClose();
-      });
-
-      // Cosmetic buttons for now
-      document.getElementById('btnExpandAll').addEventListener('click', function () {
-        alert('Expand all (not implemented yet)');
-      });
-      document.getElementById('btnCustomize').addEventListener('click', function () {
-        alert('Customize (not implemented yet)');
-      });
-    })();
-  </script>
-
-</body>
-</html>
-`;
+            '</body>' +
+            '</html>'
+        );
     }
 
     return { onRequest };
+
 });
