@@ -86,10 +86,11 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
     <span id="cos_out_count" style="font-size:12px;color:#333;"></span>
   </div>
 
-  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
     <div></div>
     <div>Item</div>
     <div style="text-align:right;">Qty</div>
+    <div style="text-align:right;">Conversion</div>
   </div>
 
   <div id="cos_out_rows"></div>
@@ -118,10 +119,11 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         <span id="cos_in_count" style="font-size:12px;color:#333;"></span>
       </div>
 
-      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
         <div></div>
         <div>Item</div>
         <div style="text-align:right;">Qty</div>
+        <div style="text-align:right;">Conversion</div>
         <div style="text-align:right;">Lots</div>
       </div>
 
@@ -176,9 +178,9 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
 </div>
 
 <style>
-  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
 
-  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
   .cos_tbl_row_input:nth-child(even){background:#fafafa;}
   .cos_tbl_row_input button{padding:6px 10px;cursor:pointer;}
 
@@ -296,7 +298,8 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
       .map(function(it){
         return {
           id: String(it.id || it.internalid),
-          name: String(it.name || it.itemid || it.text || it.value || it.id)
+          name: String(it.name || it.itemid || it.text || it.value || it.id),
+          conversion: (it.conversion != null ? String(it.conversion) : '')
         };
       });
   }
@@ -390,6 +393,10 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
       c2.textContent = it.name;
 
       // qty
+      var cConv = document.createElement('div');
+      cConv.style.textAlign = 'right';
+      cConv.textContent = (it.conversion != null ? it.conversion : '');
+
       var c3 = document.createElement('div');
       c3.style.textAlign = 'right';
       var qty = document.createElement('input');
@@ -449,11 +456,13 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         row.appendChild(c1);
         row.appendChild(c2);
         row.appendChild(c3);
+        row.appendChild(cConv);
         row.appendChild(c4);
       } else {
         row.appendChild(c1);
         row.appendChild(c2);
         row.appendChild(c3);
+        row.appendChild(cConv);
       }
       rowsEl.appendChild(row);
     });

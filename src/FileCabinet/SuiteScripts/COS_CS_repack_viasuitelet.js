@@ -43,7 +43,8 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
             ],
             columns: [
                 search.createColumn({ name: 'internalid' }),
-                search.createColumn({ name: 'itemid' })
+                search.createColumn({ name: 'itemid' }),
+                search.createColumn({ name: 'custitem_repack_conversion' })
             ]
         });
 
@@ -54,7 +55,9 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
                 const id = r.getValue({ name: 'internalid' });
                 const name = r.getValue({ name: 'itemid' });
                 if (id) {
-                    items.push({ id: String(id), name: String(name || id) });
+                    var conv = r.getValue({ name: 'custitem_repack_conversion' });
+                    console.log("{r, conv}", {r, conv});
+                    items.push({ id: String(id), name: String(name || id), conversion: String(conv || '') });
                 }
             });
         });
