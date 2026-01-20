@@ -86,7 +86,7 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
     <span id="cos_out_count" style="font-size:12px;color:#333;"></span>
   </div>
 
-  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
     <div></div>
     <div>Item</div>
     <div style="text-align:right;">Qty</div>
@@ -119,11 +119,12 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         <span id="cos_in_count" style="font-size:12px;color:#333;"></span>
       </div>
 
-      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
         <div></div>
         <div>Item</div>
         <div style="text-align:right;">Qty</div>
         <div style="text-align:right;">Conversion</div>
+        <div style="text-align:right;">Available</div>
         <div style="text-align:right;">Lots</div>
       </div>
 
@@ -178,9 +179,9 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
 </div>
 
 <style>
-  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
 
-  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
   .cos_tbl_row_input:nth-child(even){background:#fafafa;}
   .cos_tbl_row_input button{padding:6px 10px;cursor:pointer;}
 
@@ -299,7 +300,8 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         return {
           id: String(it.id || it.internalid),
           name: String(it.name || it.itemid || it.text || it.value || it.id),
-          conversion: (it.conversion != null ? String(it.conversion) : '')
+          conversion: (it.conversion != null ? String(it.conversion) : ''),
+          available: (it.available != null ? String(it.available) : '')
         };
       });
   }
@@ -311,6 +313,118 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
       return (it.name || '').toLowerCase().indexOf(q) >= 0 || (it.id || '').indexOf(q) >= 0;
     });
   }
+
+
+  function toNum(v){
+    var n = parseFloat(v);
+    return isNaN(n) ? 0 : n;
+  }
+
+  function roundNice(n){
+    if (n == null) return '';
+    var x = Number(n);
+    if (!isFinite(x)) return '';
+    var s = String(x);
+    if (s.indexOf('.') >= 0){
+      s = x.toFixed(6).replace(/\.?0+$/,'');
+    }
+    return s;
+  }
+
+  // Auto-suggest inputs based on outputs' total conversion requirement.
+  // Strategy: greedy from highest conversion to lowest, limited by available at location,
+  // excluding any items already selected as outputs.
+  function suggestInputs(){
+    try {
+      var outKeys = Object.keys(outputsSelected);
+      if (!outKeys.length) return;
+
+      var required = 0;
+      outKeys.forEach(function(k){
+        var o = outputsSelected[k];
+        if (!o) return;
+        var it = allItems.find(function(x){ return String(x.id) === String(o.id); });
+        var conv = it ? toNum(it.conversion) : toNum(o.conversion);
+        var qty  = toNum(o.qty);
+        required += (qty * conv);
+      });
+
+      if (required <= 0) return;
+
+      var exclude = {};
+      outKeys.forEach(function(k){ exclude[String(k)] = true; });
+
+      var candidates = allItems
+        .filter(function(it){
+          if (!it || !it.id) return false;
+          if (exclude[String(it.id)]) return false;
+          var conv = toNum(it.conversion);
+          var avail = toNum(it.available);
+          return conv > 0 && avail > 0;
+        })
+        .map(function(it){
+          return {
+            id: String(it.id),
+            name: String(it.name || it.id),
+            conv: toNum(it.conversion),
+            avail: toNum(it.available)
+          };
+        });
+
+      if (!candidates.length) return;
+
+      candidates.sort(function(a,b){
+        if (b.conv !== a.conv) return b.conv - a.conv;
+        return a.name.localeCompare(b.name);
+      });
+
+      inputsSelected = {};
+
+      var remaining = required;
+
+      for (var i=0;i<candidates.length;i++){
+        if (remaining <= 0) break;
+        var c = candidates[i];
+        if (c.conv <= 0 || c.avail <= 0) continue;
+
+        var maxNeed = Math.floor(remaining / c.conv);
+        if (maxNeed <= 0) continue;
+
+        var useQty = Math.min(maxNeed, Math.floor(c.avail));
+        if (useQty <= 0) continue;
+
+        inputsSelected[c.id] = { id: c.id, name: c.name, qty: roundNice(useQty) };
+        remaining -= (useQty * c.conv);
+      }
+
+      if (remaining > 0) {
+        var tail = candidates.slice().sort(function(a,b){
+          if (a.conv !== b.conv) return a.conv - b.conv;
+          return a.name.localeCompare(b.name);
+        });
+
+        for (var j=0;j<tail.length && remaining > 0;j++){
+          var t = tail[j];
+          var already = inputsSelected[t.id] ? toNum(inputsSelected[t.id].qty) : 0;
+          var availLeft = Math.floor(t.avail) - already;
+          if (availLeft <= 0 || t.conv <= 0) continue;
+
+          var need = Math.ceil(remaining / t.conv);
+          if (need <= 0) need = 1;
+          var add = Math.min(need, availLeft);
+          if (add <= 0) continue;
+
+          var newQty = already + add;
+          inputsSelected[t.id] = { id: t.id, name: t.name, qty: roundNice(newQty) };
+          remaining -= (add * t.conv);
+        }
+      }
+
+      syncHidden();
+      updateCounts();
+    } catch(e) {}
+  }
+
 
   function countSelected(map){
     return Object.keys(map).length;
@@ -397,6 +511,10 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
       cConv.style.textAlign = 'right';
       cConv.textContent = (it.conversion != null ? it.conversion : '');
 
+      var cAvail = document.createElement('div');
+      cAvail.style.textAlign = 'right';
+      cAvail.textContent = (it.available != null ? it.available : '');
+
       var c3 = document.createElement('div');
       c3.style.textAlign = 'right';
       var qty = document.createElement('input');
@@ -457,6 +575,7 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         row.appendChild(c2);
         row.appendChild(c3);
         row.appendChild(cConv);
+        row.appendChild(cAvail);
         row.appendChild(c4);
       } else {
         row.appendChild(c1);
@@ -545,6 +664,10 @@ function showStep2(){
     var wrap = byId('cos_step2_wrap');
     if (wrap) wrap.style.display = 'block';
     inputsPrepared = true;
+
+    // Auto-suggest inputs based on output totals and conversions
+    suggestInputs();
+
     renderInputs();
 
     var sumSection = byId('cos_summary_section');
