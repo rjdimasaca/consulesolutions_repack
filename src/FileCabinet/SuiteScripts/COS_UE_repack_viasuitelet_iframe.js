@@ -81,6 +81,20 @@ define(['N/ui/serverWidget', 'N/url'], (serverWidget, url) => {
 
         <div id="cos_io_rows"></div>
       </div>
+      
+      <!-- Repack Details Section -->
+        <div id="cos_repack_details_wrap" style="margin-top:14px;border:1px solid #ddd;border-radius:6px;overflow:hidden;">
+          <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
+            <div style="font-weight:bold;">Repack Details</div>
+            <div style="font-size:12px;opacity:0.9;">Items included in this Repack</div>
+          </div>
+        
+          <div id="cos_repack_details_body" style="background:#fff;">
+            <div style="padding:10px 12px;color:#666;font-size:12px;">
+              No selections yet. Choose an Input/Output to add details.
+            </div>
+          </div>
+        </div>
 
       <!-- Modal Overlay -->
       <div id="cos_modal_overlay" style="
@@ -183,6 +197,71 @@ define(['N/ui/serverWidget', 'N/url'], (serverWidget, url) => {
 
         #cos_io_wrap .cos-open .cos-details { display:block; }
         #cos_io_wrap .cos-open .cos-caret { background:#e9f2ff;border-color:#b9d3ff; }
+        
+        
+        #cos_repack_details_wrap .rd-header {
+          display:grid;
+          grid-template-columns: 90px 2.2fr 1fr 38px 38px;
+          gap:8px;
+          padding:8px 12px;
+          font-weight:bold;
+          font-size:12px;
+          background:#eee;
+          border-bottom:1px solid #ddd;
+          align-items:center;
+        }
+        #cos_repack_details_wrap .rd-row {
+          display:grid;
+          grid-template-columns: 90px 2.2fr 1fr 38px 38px;
+          gap:8px;
+          padding:8px 12px;
+          font-size:12px;
+          border-bottom:1px solid #eee;
+          align-items:center;
+        }
+        #cos_repack_details_wrap .rd-row:nth-child(even) { background:#fafafa; }
+        #cos_repack_details_wrap .rd-type { color:#666; text-transform:lowercase; }
+        #cos_repack_details_wrap .rd-qty { text-align:right; white-space:nowrap; }
+        #cos_repack_details_wrap .rd-remove {
+          text-align:right;
+        }
+        #cos_repack_details_wrap .rd-remove button {
+          background:transparent;
+          border:0;
+          color:#b00;
+          font-size:16px;
+          cursor:pointer;
+          line-height:1;
+        }
+        #cos_repack_details_wrap .rd-group-title {
+          padding:8px 12px;
+          font-weight:bold;
+          border-bottom:1px solid #ddd;
+          background:#f7f7f7;
+        }
+        #cos_repack_details_wrap .rd-subtle {
+          color:#666;
+          font-size:11px;
+        }
+        
+        #cos_repack_details_wrap .rd-edit {
+          text-align:right;
+        }
+        #cos_repack_details_wrap .rd-edit button {
+          background:transparent;
+          border:0;
+          cursor:pointer;
+          font-size:16px;
+          line-height:1;
+          padding:2px 6px;
+          color:#444;
+        }
+        #cos_repack_details_wrap .rd-edit button:hover {
+          color:#111;
+        }
+        
+        
+        
       </style>
 
       <script>
@@ -256,22 +335,28 @@ define(['N/ui/serverWidget', 'N/url'], (serverWidget, url) => {
           var titleEl = document.getElementById("cos_modal_title");
           var subtitleEl = document.getElementById("cos_modal_subtitle");
 
-          function openModal(mode, row) {
-            titleEl.textContent = mode === "input" ? "Input" : "Output";
-            subtitleEl.textContent = (row && row.name) ? row.name : "Details";
+          function openModal(mode, row, inv) {
+              titleEl.textContent = mode === "input" ? "Input" : "Output";
+              subtitleEl.textContent = (row && row.name) ? row.name : "Details";
+            
+              // Load Suitelet into iframe (now includes optional inventory context)
+              var iframeUrl = buildUrl(SUITELET_BASE_URL, {
+                mode: mode,
+                itemId: row ? row.id : "",
+                itemText: row ? row.name : "",
+                invLot: inv && inv.lot ? inv.lot : "",
+                invStatus: inv && inv.status ? inv.status : "",
+                invAvailable: inv && (inv.available !== undefined) ? String(inv.available) : "",
+                invUom: inv && inv.uom ? inv.uom : ""
+              });
+            
+              iframeEl.src = iframeUrl;
+            
+              overlayEl.style.display = "block";
+              modalEl.style.display = "block";
+              document.body.style.overflow = "hidden";
+            }
 
-            // Load Suitelet into iframe
-            var iframeUrl = buildUrl(SUITELET_BASE_URL, {
-              mode: mode,
-              itemId: row ? row.id : "",
-              itemText: row ? row.name : ""
-            });
-            iframeEl.src = iframeUrl;
-
-            overlayEl.style.display = "block";
-            modalEl.style.display = "block";
-            document.body.style.overflow = "hidden";
-          }
 
           function closeModal() {
             modalEl.style.display = "none";
@@ -290,25 +375,229 @@ define(['N/ui/serverWidget', 'N/url'], (serverWidget, url) => {
 
           // Listen for Suitelet iframe -> parent message payload
           // Suitelet must do: window.parent.postMessage({ type:'COS_REPACK_MODAL_SUBMIT', payload: {...} }, '*');
-          window.addEventListener("message", function (event) {
-            try {
-              var data = event.data;
-              if (!data || typeof data !== "object") return;
-              if (data.type !== "COS_REPACK_MODAL_SUBMIT") return;
+          // --- Repack Details State ---
+var repackState = {
+  entries: [] // each entry is one "work order" style submission
+};
 
-              // Store payload to hidden field
-              var hiddenField = document.getElementById("custpage_cos_popup_payload");
-              if (hiddenField) {
-                hiddenField.value = JSON.stringify(data.payload || {});
-              }
+function getHiddenPayloadField() {
+  return document.getElementById("custpage_cos_popup_payload");
+}
 
-              // Close modal after successful submit
-              closeModal();
-            } catch (err) {
-              // keep quiet to avoid breaking UI
-              console && console.error && console.error(err);
-            }
-          });
+function syncHiddenField() {
+  var hidden = getHiddenPayloadField();
+  if (hidden) hidden.value = JSON.stringify(repackState);
+}
+
+function addEntryFromPayload(payload) {
+  // Normalize payload (defensive)
+  var entry = {
+    id: String(Date.now()) + "_" + Math.floor(Math.random() * 100000),
+    mode: payload && payload.mode ? payload.mode : "input",
+    input: payload && payload.input ? payload.input : {},
+    outputs: (payload && payload.outputs && payload.outputs.length) ? payload.outputs : []
+  };
+
+  repackState.entries.push(entry);
+  syncHiddenField();
+  renderRepackDetails();
+}
+
+function removeEntry(entryId) {
+  repackState.entries = repackState.entries.filter(function (e) { return e.id !== entryId; });
+  syncHiddenField();
+  renderRepackDetails();
+}
+
+function formatQty(qty, uomText) {
+  var q = (qty == null) ? "" : String(qty);
+  var u = (uomText == null) ? "" : String(uomText);
+  return (q && u) ? (q + " " + u) : (q || "");
+}
+
+function renderRepackDetails() {
+  var body = document.getElementById("cos_repack_details_body");
+  if (!body) return;
+
+  if (!repackState.entries.length) {
+    body.innerHTML =
+      '<div style="padding:10px 12px;color:#666;font-size:12px;">' +
+      'No selections yet. Choose an Input/Output to add details.' +
+      '</div>';
+    return;
+  }
+
+  // For now, treat each payload submission as a "New Work Order" group
+  var html = '';
+
+  repackState.entries.forEach(function (entry, idx) {
+    var inputText = entry.input && entry.input.itemText ? entry.input.itemText : (entry.input && entry.input.itemId ? entry.input.itemId : "—");
+    var lotText = entry.input && entry.input.lotText ? entry.input.lotText : "";
+    var statusText = entry.input && entry.input.statusText ? entry.input.statusText : "";
+    var inputQty = entry.input && entry.input.qty ? entry.input.qty : "";
+    var inputUom = entry.input && entry.input.uomText ? entry.input.uomText : "";
+
+    var inputLineLabel = inputText;
+    var inputSub = [];
+    if (lotText && lotText !== "-") inputSub.push("Lot: " + lotText);
+    if (statusText) inputSub.push("Status: " + statusText);
+
+    html +=
+      '<div class="rd-group-title">' +
+        'New Work Order <span class="rd-subtle">(Entry ' + (idx + 1) + ')</span>' +
+      '</div>' +
+
+    '<div class="rd-header">' +
+            '<div>TYPE</div>' +
+        '<div>ITEM</div>' +
+        '<div style="text-align:right;">QTY</div>' +
+        '<div></div>' +
+        '<div></div>' +
+    '</div>' +
+
+      // OUTPUT lines (if any)
+      (entry.outputs || []).map(function (o) {
+        var outId = o.outputId || "—";
+        var outQty = o.qty || "";
+        return (
+          '<div class="rd-row">' +
+            '<div class="rd-type">output</div>' +
+            '<div>' + outId + '</div>' +
+            '<div class="rd-qty">' + outQty + '</div>' +
+            '<div></div>' +
+          '</div>'
+        );
+      }).join('') +
+
+      // INPUT line
+      '<div class="rd-row">' +
+          '<div class="rd-type">input</div>' +
+          '<div>' +
+            inputLineLabel +
+            (inputSub.length ? ('<div class="rd-subtle">' + inputSub.join(' • ') + '</div>') : '') +
+          '</div>' +
+          '<div class="rd-qty">' + formatQty(inputQty, inputUom) + '</div>' +
+        
+          // Remove button
+          '<div class="rd-remove">' +
+            '<button type="button" data-rm="' + entry.id + '" title="Remove">×</button>' +
+          '</div>' +
+        
+          // Edit/reopen icon button (checkbox-like)
+          '<div class="rd-edit">' +
+            '<button type="button" data-edit="' + entry.id + '" title="Edit">' +
+              '☑' +
+            '</button>' +
+          '</div>' +
+        '</div>'
+       +
+
+      // Quick add placeholders (just visual)
+      '<div style="padding:8px 12px;border-bottom:1px solid #eee;background:#fff;color:#2a5db0;font-size:12px;">' +
+        '+ New Input' +
+      '</div>' +
+      '<div style="padding:8px 12px;border-bottom:1px solid #ddd;background:#fff;color:#2a5db0;font-size:12px;">' +
+        '+ New Output' +
+      '</div>';
+  });
+
+  body.innerHTML = html;
+
+  // Wire remove buttons
+  Array.prototype.slice.call(body.querySelectorAll('button[data-rm]')).forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      var id = btn.getAttribute('data-rm');
+      removeEntry(id);
+    });
+  });
+  
+  Array.prototype.slice.call(body.querySelectorAll('button[data-edit]')).forEach(function (btn) {
+  btn.addEventListener('click', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    var entryId = btn.getAttribute('data-edit');
+    var entry = repackState.entries.find(function (x) { return x.id === entryId; });
+    if (!entry) return;
+
+    // Minimal: reopen modal using entry input info (no prefill yet)
+    var rowStub = {
+      id: (entry.input && entry.input.itemId) ? entry.input.itemId : "",
+      name: (entry.input && entry.input.itemText) ? entry.input.itemText : ""
+    };
+
+    openModal("input", rowStub); // later we’ll pass the entry to prefill
+  });
+});
+
+  
+}
+
+// --- Listen for iframe Suitelet messages ---
+window.addEventListener("message", function (event) {
+  try {
+    var data = event.data;
+    if (!data || typeof data !== "object") return;
+
+    if (data.type === "COS_REPACK_MODAL_SUBMIT") {
+      // store to hidden field (raw payload) if you still want it:
+      // var hiddenField = document.getElementById("custpage_cos_popup_payload");
+      // if (hiddenField) hiddenField.value = JSON.stringify(data.payload || {});
+
+      addEntryFromPayload(data.payload || {});
+      closeModal(); // your existing closeModal() already defined
+      return;
+    }
+
+    if (data.type === "COS_REPACK_MODAL_CLOSE") {
+      closeModal();
+      return;
+    }
+  } catch (err) {
+    console && console.error && console.error(err);
+  }
+});
+
+// Initial render in case hidden field already has content
+(function initRepackDetailsFromHidden() {
+  try {
+    var hidden = getHiddenPayloadField();
+    if (!hidden || !hidden.value) return;
+
+    // If the hidden field contains repackState JSON, reload it
+    var parsed = JSON.parse(hidden.value);
+    if (parsed && parsed.entries && Array.isArray(parsed.entries)) {
+      repackState = parsed;
+      renderRepackDetails();
+    }
+  } catch (e) {
+    // ignore
+  }
+})();
+
+          
+          
+          // Dummy inventory-by-item (lot rows)
+            var inventoryByItemId = {
+              "CHEM-GA50": [
+                { lot: "Nov 8 2025",  status: "Good",            available: 341.008, uom: "lb", pounds: 341.008 },
+                { lot: "Nov 16 2025", status: "Good",            available: 800.000, uom: "lb", pounds: 800.000 },
+                { lot: "Nov 20 2025", status: "Good",            available: 400.000, uom: "lb", pounds: 400.000 },
+                { lot: "Nov 22 2025", status: "Requires Rework", available: 1000.000, uom: "lb", pounds: 1000.000 },
+                { lot: "Nov 24 2025", status: "Good",            available: 2200.000, uom: "lb", pounds: 2200.000 }
+              ],
+              "CHEM-GA50-P": [
+                { lot: "-", status: "Good", available: 11, uom: "ea", pounds: "-" }
+              ],
+              "CHEM-GA50-D": [
+                { lot: "-", status: "Good", available: 13, uom: "ea", pounds: "-" }
+              ],
+              "CHEM-GA50-T": [
+                { lot: "-", status: "Good", available: 5.018, uom: "ea", pounds: "-" }
+              ]
+            };
+
 
           // Render rows
           rows.forEach(function (r) {
@@ -346,25 +635,97 @@ define(['N/ui/serverWidget', 'N/url'], (serverWidget, url) => {
             actions.appendChild(btnOut);
             row.appendChild(actions);
 
-            // Details panel
+            // Details panel (Inventory table)
             var details = makeEl("div", "cos-details", "");
             details.setAttribute("aria-hidden", "true");
-
+            
+            // Build a container similar to NetSuite look
             var box = makeEl("div", "box", "");
-            var grid = makeEl("div", "", "");
-            grid.style.display = "grid";
-            grid.style.gridTemplateColumns = "160px 1fr";
-            grid.style.gap = "6px 12px";
-
-            setKV(grid, "Location", r.extra.location);
-            setKV(grid, "Lot", r.extra.lot);
-            setKV(grid, "Status", r.extra.status);
-            setKV(grid, "Preferred Stock", r.extra.prefStock);
-            setKV(grid, "Build Point", r.extra.buildPoint);
-            setKV(grid, "Notes", r.extra.notes);
-
-            box.appendChild(grid);
+            box.style.padding = "0"; // we'll control padding via inner sections
+            
+            // Title bar inside expanded area
+            var invHeader = makeEl("div", "", "");
+            invHeader.style.padding = "8px 10px";
+            invHeader.style.background = "#f1f3f6";
+            invHeader.style.borderBottom = "1px solid #ddd";
+            invHeader.style.fontWeight = "bold";
+            invHeader.style.fontSize = "12px";
+            invHeader.textContent = "Current Inventory";
+            box.appendChild(invHeader);
+            
+            // Table header row
+            var tblHead = makeEl("div", "", "");
+            tblHead.style.display = "grid";
+            tblHead.style.gridTemplateColumns = "1.2fr 1fr 1fr 1fr 1fr";
+            tblHead.style.padding = "8px 10px";
+            tblHead.style.fontSize = "11px";
+            tblHead.style.fontWeight = "bold";
+            tblHead.style.background = "#eee";
+            tblHead.style.borderBottom = "1px solid #ddd";
+            tblHead.innerHTML =
+              "<div>SERIAL/LOT</div>" +
+              "<div>STATUS</div>" +
+              "<div style='text-align:right;'>AVAILABLE</div>" +
+              "<div style='text-align:right;'>AVAILABLE IN POUNDS</div>" +
+              "<div style='text-align:right;'>ADD ITEM AS</div>";
+            box.appendChild(tblHead);
+            
+            // Table body rows
+            var invRows = inventoryByItemId[r.id] || [
+              { lot: "-", status: "Good", available: "-", uom: "", pounds: "-" }
+            ];
+            
+            invRows.forEach(function (inv, idx) {
+              var rowEl = makeEl("div", "", "");
+              rowEl.style.display = "grid";
+              rowEl.style.gridTemplateColumns = "1.2fr 1fr 1fr 1fr 1fr";
+              rowEl.style.padding = "8px 10px";
+              rowEl.style.fontSize = "12px";
+              rowEl.style.borderBottom = "1px solid #eee";
+              rowEl.style.alignItems = "center";
+              rowEl.style.background = (idx % 2 === 0) ? "#fff" : "#fafafa";
+            
+              // Lot/Serial
+              var c1 = makeEl("div", "", inv.lot);
+              // Status
+              var c2 = makeEl("div", "", inv.status);
+            
+              // Available (right aligned)
+              var c3 = makeEl("div", "", (inv.available === "-" ? "-" : (String(inv.available) + " " + (inv.uom || ""))));
+              c3.style.textAlign = "right";
+            
+              // Pounds (right aligned)
+              var c4 = makeEl("div", "", (inv.pounds === "-" ? "-" : (String(inv.pounds) + " lb")));
+              c4.style.textAlign = "right";
+            
+              // Action button
+              var c5 = makeEl("div", "", "");
+              c5.style.textAlign = "right";
+            
+              var btnLotInput = makeEl("button", "", "Input");
+              btnLotInput.type = "button";
+              btnLotInput.style.padding = "5px 10px";
+              btnLotInput.style.cursor = "pointer";
+            
+              // Clicking this chooses the lot as input and opens the modal with inv context
+              btnLotInput.addEventListener("click", function (e) {
+                e.stopPropagation(); // don't collapse row
+                openModal("input", r, inv);
+              });
+            
+              c5.appendChild(btnLotInput);
+            
+              rowEl.appendChild(c1);
+              rowEl.appendChild(c2);
+              rowEl.appendChild(c3);
+              rowEl.appendChild(c4);
+              rowEl.appendChild(c5);
+            
+              box.appendChild(rowEl);
+            });
+            
             details.appendChild(box);
+
 
             // Expand/collapse
             row.addEventListener("click", function () { toggleGroup(group); });
@@ -393,5 +754,5 @@ define(['N/ui/serverWidget', 'N/url'], (serverWidget, url) => {
     `;
     };
 
-    return { beforeLoad };
+    return {beforeLoad};
 });
