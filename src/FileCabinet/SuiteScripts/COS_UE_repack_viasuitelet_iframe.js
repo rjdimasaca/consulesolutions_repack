@@ -46,6 +46,14 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         });
         summaryPayload.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
 
+
+        const inputLotsPayload = form.addField({
+            id: 'custpage_cos_input_lots_payload',
+            type: serverWidget.FieldType.LONGTEXT,
+            label: 'Input Lots Payload'
+        });
+        inputLotsPayload.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+
         // Suitelet base URL for lot selection (iframe modal)
         // NOTE: Update scriptId/deploymentId to match your existing Suitelet deployment.
         const suiteletBaseUrl = url.resolveScript({
@@ -194,6 +202,22 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
   var SUITELET_BASE_URL = ${JSON.stringify(suiteletBaseUrl)};
   // State
   var inputLotsByItemId = {}; // itemId -> lots[]
+  function syncInputLotsHidden(){
+    try{
+      var h = byId('custpage_cos_input_lots_payload');
+      if (h) h.value = JSON.stringify(inputLotsByItemId);
+    }catch(e){}
+  }
+  function loadInputLotsHidden(){
+    try{
+      var h = byId('custpage_cos_input_lots_payload');
+      if (h && h.value){
+        var obj = JSON.parse(h.value);
+        if (obj && typeof obj === 'object') inputLotsByItemId = obj;
+      }
+    }catch(e){}
+  }
+
   var currentLotsItem = null; // item object for currently open modal
 
   var allItems = [];
@@ -203,6 +227,8 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
   var inputsPrepared = false;
 
   function byId(id){ return document.getElementById(id); }
+
+  loadInputLotsHidden();
 
 
   // Modal helpers (lots selection)
@@ -235,11 +261,16 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
       repLocationId = locEl.value || '';
     }
 
+    var prevLots = (item && item.id) ? (inputLotsByItemId[String(item.id)] || []) : [];
+    var prefill = '';
+    try { prefill = encodeURIComponent(JSON.stringify(prevLots)); } catch(e) { prefill = ''; }
+
     var iframeUrl = buildUrl(SUITELET_BASE_URL, {
       mode: 'input',
       itemId: item ? item.id : '',
       itemText: item ? item.name : '',
-      repLocationId: repLocationId
+      repLocationId: repLocationId,
+      prefill: prefill
     });
 
     iframe.src = iframeUrl;
@@ -283,6 +314,7 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
   }
 
   function syncHidden(){
+    syncInputLotsHidden();
     var outF = byId('custpage_cos_outputs_payload');
     var inF  = byId('custpage_cos_inputs_payload');
     var sumF = byId('custpage_cos_summary_payload');
@@ -588,8 +620,10 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         try {
           if (data.payload && data.payload.itemId) {
             inputLotsByItemId[String(data.payload.itemId)] = (data.payload.lots || []);
+            syncInputLotsHidden();
           } else if (currentLotsItem && currentLotsItem.id) {
             inputLotsByItemId[String(currentLotsItem.id)] = (data.payload && data.payload.lots) ? data.payload.lots : [];
+            syncInputLotsHidden();
           }
 
           // Update inline summary badge for the current item (if present)

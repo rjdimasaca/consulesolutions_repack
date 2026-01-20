@@ -12,6 +12,8 @@ define(['N/search'], function (search) {
         var itemText = req.parameters.itemText || '';
         var repLocationId = req.parameters.repLocationId || '';
 
+        var prefillParam = req.parameters.prefill || '';
+
         if (!itemId) {
             res.write(buildErrorHtml('Missing required parameter: itemId'));
             return;
@@ -27,6 +29,7 @@ define(['N/search'], function (search) {
             itemId: itemId,
             itemText: itemText,
             repLocationId: repLocationId,
+            prefillParam: prefillParam,
             rows: rows
         }));
     }
@@ -90,6 +93,7 @@ define(['N/search'], function (search) {
         var itemId = opts.itemId;
         var itemText = opts.itemText;
         var repLocationId = opts.repLocationId;
+        var prefillParam = opts.prefillParam || '';
         var rows = opts.rows || [];
 
         // Build status options from results
@@ -193,6 +197,9 @@ define(['N/search'], function (search) {
             + '(function(){'
             + '  var ITEM_ID = ' + JSON.stringify(itemId) + ';'
             + '  var ITEM_TEXT = ' + JSON.stringify(itemText) + ';'
+            + '  var PREFILL_RAW = ' + JSON.stringify(prefillParam) + ';'
+            + '  var PREFILL_MAP = {};'
+            + '  try { if (PREFILL_RAW) { var decoded = decodeURIComponent(PREFILL_RAW); var arr = JSON.parse(decoded); if (arr && arr.length) { for (var pi=0; pi<arr.length; pi++){ var it = arr[pi]; if (it && it.key) PREFILL_MAP[String(it.key)] = it; } } } } catch(e) {}'
             + '  var msgEl = document.getElementById("msg");'
             + '  function showMsg(t){ if(!msgEl) return; msgEl.style.display = t ? "block" : "none"; msgEl.textContent = t || ""; }'
             + '  function postClose(){ window.parent.postMessage({ type: "COS_REPACK_MODAL_CLOSE" }, "*"); }'
@@ -265,6 +272,26 @@ define(['N/search'], function (search) {
             + '  for (var i=0;i<cbs.length;i++){ (function(cb){ cb.addEventListener("change", function(){ onCbChange(cb); }); })(cbs[i]); }'
             + '  var qtys = document.querySelectorAll("input.lot_qty");'
             + '  for (var j=0;j<qtys.length;j++){ (function(q){ q.addEventListener("input", function(){ onQtyInput(q); }); })(qtys[j]); }'
+            + '  function applyPrefill(){'
+            + '    try {'
+            + '      var cbs2 = document.querySelectorAll("input.lot_cb");'
+            + '      for (var ii=0; ii<cbs2.length; ii++) {'
+            + '        var cbx = cbs2[ii];'
+            + '        var key = cbx.getAttribute("data-key") || "";'
+            + '        if (!key) continue;'
+            + '        var pf = PREFILL_MAP[key];'
+            + '        if (!pf) continue;'
+            + '        cbx.checked = true;'
+            + '        onCbChange(cbx);'
+            + '        var qEl = getQtyElByKey(key);'
+            + '        if (qEl) {'
+            + '          if (pf.qty != null) qEl.value = String(pf.qty);'
+            + '          onQtyInput(qEl);'
+            + '        }'
+            + '      }'
+            + '    } catch(e) {}'
+            + '  }'
+            + '  applyPrefill();'
             + '  var statusSel = document.getElementById("statusFilter");'
             + '  if (statusSel){ statusSel.addEventListener("change", function(){'
             + '    var val = statusSel.value || "";'
