@@ -3,7 +3,7 @@
  * @NScriptType UserEventScript
  */
 
-define(['N/ui/serverWidget'], (serverWidget) => {
+define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
 
     const beforeLoad = (scriptContext) => {
         const { form, type } = scriptContext;
@@ -45,6 +45,13 @@ define(['N/ui/serverWidget'], (serverWidget) => {
             label: 'Repack Summary Payload'
         });
         summaryPayload.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+
+        // Suitelet base URL for lot selection (iframe modal)
+        // NOTE: Update scriptId/deploymentId to match your existing Suitelet deployment.
+        const suiteletBaseUrl = url.resolveScript({
+            scriptId: 'customscript_cos_repack_popup_sl',
+            deploymentId: 'customdeploy_cos_repack_popup_sl'
+        });
 
         const htmlField = form.addField({
             id: 'custpage_cos_io_html',
@@ -103,10 +110,11 @@ define(['N/ui/serverWidget'], (serverWidget) => {
         <span id="cos_in_count" style="font-size:12px;color:#333;"></span>
       </div>
 
-      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
         <div></div>
         <div>Item</div>
         <div style="text-align:right;">Qty</div>
+        <div style="text-align:right;">Lots</div>
       </div>
 
       <div id="cos_in_rows"></div>
@@ -148,8 +156,24 @@ define(['N/ui/serverWidget'], (serverWidget) => {
   <div id="cos_summary_body" style="background:#fff;"></div>
 </div>
 
+
+<!-- LOT SELECTION MODAL (iframe) -->
+<div id="cos_modal_overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:99998;"></div>
+<div id="cos_modal" style="display:none;position:fixed;top:6%;left:50%;transform:translateX(-50%);width:92%;max-width:1200px;height:80%;background:#fff;border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,0.35);z-index:99999;overflow:hidden;font-family:Arial, sans-serif;">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#3f5166;color:#fff;font-weight:bold;font-size:14px;">
+    <div id="cos_modal_title">Select Lots</div>
+    <button id="cos_modal_close_x" type="button" style="background:transparent;border:0;color:#fff;font-size:18px;cursor:pointer;line-height:1;">×</button>
+  </div>
+  <iframe id="cos_modal_iframe" src="about:blank" style="border:0;width:100%;height:calc(100% - 44px);"></iframe>
+</div>
+
 <style>
   .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+
+  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row_input:nth-child(even){background:#fafafa;}
+  .cos_tbl_row_input button{padding:6px 10px;cursor:pointer;}
+
   .cos_tbl_row:nth-child(even){background:#fafafa;}
   .cos_tbl_row input[type="text"]{padding:6px;width:140px;text-align:right;}
   .cos_tbl_row input[type="checkbox"]{width:16px;height:16px;}
@@ -166,7 +190,12 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 
 <script>
 (function(){
+  // Suitelet base url injected by UE
+  var SUITELET_BASE_URL = ${JSON.stringify(suiteletBaseUrl)};
   // State
+  var inputLotsByItemId = {}; // itemId -> lots[]
+  var currentLotsItem = null; // item object for currently open modal
+
   var allItems = [];
   var lastMeta = {};
   var outputsSelected = {}; // id -> {id, name, qty}
@@ -174,6 +203,60 @@ define(['N/ui/serverWidget'], (serverWidget) => {
   var inputsPrepared = false;
 
   function byId(id){ return document.getElementById(id); }
+
+
+  // Modal helpers (lots selection)
+  function buildUrl(baseUrl, params){
+    var q = [];
+    for (var k in params){
+      if (!Object.prototype.hasOwnProperty.call(params, k)) continue;
+      q.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k] == null ? '' : String(params[k])));
+    }
+    if (!q.length) return baseUrl;
+    return baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + q.join('&');
+  }
+
+  function openLotsModal(item){
+    currentLotsItem = item || null;
+    var overlay = byId('cos_modal_overlay');
+    var modal = byId('cos_modal');
+    var iframe = byId('cos_modal_iframe');
+    var title = byId('cos_modal_title');
+    if (!overlay || !modal || !iframe) return;
+
+    if (title) title.textContent = 'Select Lots - ' + (item && item.name ? item.name : '');
+
+    // Read parent form Location (custrecord_cos_rep_location)
+    // var locEl = document.getElementById('custrecord_cos_rep_location');
+    var locEl = {value: window.nlapiGetFieldValue('custrecord_cos_rep_location')};
+    var repLocationId = '';
+    if (locEl) {
+      // Works for <select> and hidden inputs
+      repLocationId = locEl.value || '';
+    }
+
+    var iframeUrl = buildUrl(SUITELET_BASE_URL, {
+      mode: 'input',
+      itemId: item ? item.id : '',
+      itemText: item ? item.name : '',
+      repLocationId: repLocationId
+    });
+
+    iframe.src = iframeUrl;
+    overlay.style.display = 'block';
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLotsModal(){
+    var overlay = byId('cos_modal_overlay');
+    var modal = byId('cos_modal');
+    var iframe = byId('cos_modal_iframe');
+    if (modal) modal.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+    if (iframe) iframe.src = 'about:blank';
+    document.body.style.overflow = '';
+  }
 
   function normalizeItems(items){
     if (!Array.isArray(items)) return [];
@@ -241,6 +324,7 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 
   function renderTable(rowsEl, items, selectionMap, searchQuery, excludeIds){
     if (!rowsEl) return;
+    var isInputTable = (rowsEl.id === 'cos_in_rows');
     var exclude = excludeIds || {};
 
     var filtered = applySearch(items, searchQuery);
@@ -260,7 +344,7 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 
     filtered.forEach(function(it){
       var row = document.createElement('div');
-      row.className = 'cos_tbl_row';
+      row.className = isInputTable ? 'cos_tbl_row_input' : 'cos_tbl_row';
 
       // checkbox
       var c1 = document.createElement('div');
@@ -310,9 +394,35 @@ define(['N/ui/serverWidget'], (serverWidget) => {
         syncHidden();
       });
 
-      row.appendChild(c1);
-      row.appendChild(c2);
-      row.appendChild(c3);
+      if (isInputTable) {
+        var c4 = document.createElement('div');
+        c4.style.textAlign = 'right';
+        var btnLots = document.createElement('button');
+        btnLots.type = 'button';
+        btnLots.textContent = 'Select Lots';
+        var span = document.createElement('span');
+        span.style.marginLeft = '8px';
+        span.style.fontSize = '12px';
+        span.style.color = '#666';
+        span.setAttribute('data-lot-sum', String(it.id));
+        var sel = inputLotsByItemId[String(it.id)];
+        if (sel && sel.length) { span.textContent = '(' + sel.length + ' selected)'; } else { span.textContent = ''; }
+        btnLots.addEventListener('click', function(e){
+          e.preventDefault();
+          e.stopPropagation();
+          openLotsModal(it);
+        });
+        c4.appendChild(btnLots);
+        c4.appendChild(span);
+        row.appendChild(c1);
+        row.appendChild(c2);
+        row.appendChild(c3);
+        row.appendChild(c4);
+      } else {
+        row.appendChild(c1);
+        row.appendChild(c2);
+        row.appendChild(c3);
+      }
       rowsEl.appendChild(row);
     });
   }
@@ -433,6 +543,18 @@ define(['N/ui/serverWidget'], (serverWidget) => {
         renderSummary();
       });
     }
+    // Modal close wiring
+    var closeX = byId('cos_modal_close_x');
+    var overlay = byId('cos_modal_overlay');
+    if (closeX && !closeX._cosBound) {
+      closeX._cosBound = true;
+      closeX.addEventListener('click', function(){ closeLotsModal(); });
+    }
+    if (overlay && !overlay._cosBound) {
+      overlay._cosBound = true;
+      overlay.addEventListener('click', function(){ closeLotsModal(); });
+    }
+
   }
 
   function resetAll(){
@@ -451,6 +573,40 @@ define(['N/ui/serverWidget'], (serverWidget) => {
     updateCounts();
     updateStepButtons();
   }
+
+
+  // Listen for iframe suitelet messages (optional)
+  window.addEventListener('message', function(event){
+    try{
+      var data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'COS_REPACK_MODAL_CLOSE') {
+        closeLotsModal();
+        return;
+      }
+      if (data.type === 'COS_REPACK_MODAL_SUBMIT') {
+        try {
+          if (data.payload && data.payload.itemId) {
+            inputLotsByItemId[String(data.payload.itemId)] = (data.payload.lots || []);
+          } else if (currentLotsItem && currentLotsItem.id) {
+            inputLotsByItemId[String(currentLotsItem.id)] = (data.payload && data.payload.lots) ? data.payload.lots : [];
+          }
+
+          // Update inline summary badge for the current item (if present)
+          var itemKey = (data.payload && data.payload.itemId) ? String(data.payload.itemId) : (currentLotsItem && currentLotsItem.id ? String(currentLotsItem.id) : '');
+          if (itemKey) {
+            var el = document.querySelector('[data-lot-sum="' + itemKey + '"]');
+            if (el) {
+              var arr = inputLotsByItemId[itemKey] || [];
+              el.textContent = arr.length ? '(' + arr.length + ' selected)' : '';
+            }
+          }
+        } catch (e) {}
+        closeLotsModal();
+        return;
+      }
+    } catch(e){}
+  });
 
   // Expose for Client Script
   window.COS_REPACK_UI = window.COS_REPACK_UI || {};
