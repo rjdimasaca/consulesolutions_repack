@@ -3,7 +3,7 @@
  * @NScriptType UserEventScript
  */
 
-define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
+define(['N/ui/serverWidget','N/url','N/search','N/log'], (serverWidget, url, search, log) => {
 
     const beforeLoad = (scriptContext) => {
         const { form, type } = scriptContext;
@@ -209,11 +209,13 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
 .cos_dist_wrap{padding:12px;border-top:1px solid #eee;background:#fff;}
   .cos_dist_title{font-weight:bold;font-size:12px;margin-bottom:6px;}
   .cos_dist_sub{font-size:12px;color:#666;margin-bottom:10px;line-height:1.4;}
-  .cos_dist_grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .cos_dist_grid{display:grid;grid-template-columns:1fr;gap:12px;}
   .cos_dist_row{display:grid;grid-template-columns: 2fr 1fr 90px;gap:8px;padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;align-items:center;background:#fff;}
   .cos_dist_row:nth-child(even){background:#fafafa;}
   .cos_dist_right{text-align:right;white-space:nowrap;}
   .cos_dist_small{font-size:11px;color:#666;}
+  .cos_dist_toggle{float:right;cursor:pointer;color:#0070d2;font-size:11px;margin-left:8px;user-select:none;}
+  .cos_dist_body{margin-top:2px;}
 
 </style>
 
@@ -248,6 +250,28 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
   var inputsPrepared = false;
 
   function byId(id){ return document.getElementById(id); }
+
+  // Prorated distribution: collapsible input allocations per output
+  function bindDistToggles(){
+    try{
+      var toggles = document.querySelectorAll('.cos_dist_toggle');
+      if (!toggles || !toggles.length) return;
+      toggles.forEach(function(t){
+        if (t._cosBound) return;
+        t._cosBound = true;
+        t.addEventListener('click', function(e){
+          try{ e.preventDefault(); e.stopPropagation(); }catch(_e){}
+          var outId = t.getAttribute('data-outid') || '';
+          var body = byId('cos_dist_body_' + outId);
+          if (!body) return;
+          var isHidden = (body.style.display === 'none');
+          body.style.display = isHidden ? 'block' : 'none';
+          t.textContent = isHidden ? 'Hide inputs' : 'Show inputs';
+        });
+      });
+    }catch(e){}
+  }
+
 
   loadInputLotsHidden();
 
@@ -756,6 +780,8 @@ function showStep2(){
            +  '<div>Input</div><div class="cos_dist_right">Allocated Qty</div><div class="cos_dist_right">Lots</div>'
            +  '</div>';
 
+      html += '<div id="cos_dist_body_' + (outReq.id || '') + '" class="cos_dist_body">';
+
       ins.forEach(function(inp){
         var inQty = toNum(inp.qty);
         var allocQty = inQty * (outReq.share || 0);
@@ -773,6 +799,8 @@ function showStep2(){
              +  '<div class="cos_dist_right">' + (lotCount ? ('(' + lotCount + ')') : '') + '</div>'
              +  '</div>';
       });
+
+      html += '</div>'; // .cos_dist_body
 
       html += '</div>';
       return html;
@@ -807,11 +835,13 @@ function showStep2(){
       html += '<div class="cos_sum_box_hdr">'
            +  (outReq.name || '') + ' <span class="cos_badge">' + (outReq.qty || '') + '</span>'
            +  ' <span class="cos_dist_small">(' + roundNice((outReq.share || 0) * 100) + '%)</span>'
-           +  '</div>';
+           +  ' <span class="cos_dist_toggle" data-outid="' + (outReq.id || '') + '">Hide inputs</span></div>';
 
       html += '<div class="cos_dist_row" style="font-weight:bold;background:#f7f7f7;">'
            +  '<div>Input</div><div class="cos_dist_right">Allocated Qty</div><div class="cos_dist_right">Lots</div>'
            +  '</div>';
+
+      html += '<div id="cos_dist_body_' + (outReq.id || '') + '" class="cos_dist_body">';
 
       ins.forEach(function(inp){
         var q = (allocMap[String(outReq.id)] && allocMap[String(outReq.id)][String(inp.id)] != null)
@@ -827,6 +857,8 @@ function showStep2(){
              +  '<div class="cos_dist_right">' + (lotCount ? ('(' + lotCount + ')') : '') + '</div>'
              +  '</div>';
       });
+
+      html += '</div>'; // .cos_dist_body
 
       html += '</div>';
       return html;
@@ -850,6 +882,7 @@ function showStep2(){
     html2 += '</div>';
 
     body.innerHTML = html2;
+    bindDistToggles();
     summarySection.style.display = 'block';
     syncHidden();
 
@@ -982,6 +1015,309 @@ function showStep2(){
 `;
     };
 
-    return { beforeLoad };
+    function safeParseJson(raw) {
+        try {
+            if (!raw || typeof raw !== 'string') return null;
+            const t = raw.trim();
+            if (!t) return null;
+            return JSON.parse(t);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function toNum(v) {
+        const n = parseFloat(v);
+        return isNaN(n) ? 0 : n;
+    }
+
+    function round6(n) {
+        const x = Number(n);
+        if (!isFinite(x)) return 0;
+        return Math.round(x * 1e6) / 1e6;
+    }
+
+    function fetchConversionMap(itemIds) {
+        const map = {};
+        if (!itemIds || !itemIds.length) return map;
+
+        try {
+            const s = search.create({
+                type: search.Type.ITEM,
+                filters: [
+                    ['internalid', 'anyof', itemIds]
+                ],
+                columns: [
+                    search.createColumn({ name: 'internalid' }),
+                    search.createColumn({ name: 'custitem_repack_conversion' })
+                ]
+            });
+
+            s.run().each((r) => {
+                const id = String(r.getValue({ name: 'internalid' }) || '');
+                if (!id) return true;
+                map[id] = toNum(r.getValue({ name: 'custitem_repack_conversion' }));
+                return true;
+            });
+        } catch (e) {
+            try { log.error({ title: 'COS Repack: conversion lookup failed', details: e }); } catch (_e) {}
+        }
+
+        return map;
+    }
+
+    function buildWorkordersPayload(newRecord) {
+        // Read UI payloads (custpage fields) – available on submit context
+        const rawSummary = newRecord.getValue({ fieldId: 'custpage_cos_summary_payload' })
+            || newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' })
+            || '';
+        const rawLots = newRecord.getValue({ fieldId: 'custpage_cos_input_lots_payload' })
+            || newRecord.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' })
+            || '';
+
+        const summary = safeParseJson(rawSummary) || {};
+        const lotsMap = safeParseJson(rawLots) || {};
+
+        const outputs = Array.isArray(summary.outputs) ? summary.outputs : [];
+        const inputs = Array.isArray(summary.inputs) ? summary.inputs : [];
+
+        const subsidiary = newRecord.getValue({ fieldId: 'custrecord_cos_rep_subsidiary' });
+        const location = newRecord.getValue({ fieldId: 'custrecord_cos_rep_location' });
+
+        const itemIds = [];
+        outputs.forEach(o => { if (o && o.id) itemIds.push(String(o.id)); });
+        inputs.forEach(i => { if (i && i.id) itemIds.push(String(i.id)); });
+
+        const convMap = fetchConversionMap(itemIds);
+
+        // Output requirements (Qty × Conversion). If conversion missing, fallback to qty-only share.
+        const outReq = outputs.map((o) => {
+            const outId = o && o.id ? String(o.id) : '';
+            const qty = toNum(o && o.qty);
+            const conv = convMap[outId] || 0;
+            const req = (conv > 0) ? (qty * conv) : qty;
+            return { outId, qty, conv, req };
+        }).filter(x => x.outId);
+
+        const totalReq = outReq.reduce((a, b) => a + toNum(b.req), 0);
+        const shares = {};
+        outReq.forEach((o) => {
+            shares[o.outId] = totalReq > 0 ? (toNum(o.req) / totalReq) : 0;
+        });
+
+        // Allocate each input container qty across outputs using shares.
+        // Rounding: round to 6dp and adjust last output per input to keep totals matching.
+        const allocationsByOut = {}; // outId -> [ {inputId, qty, lots} ]
+        outReq.forEach(o => { allocationsByOut[o.outId] = []; });
+
+        inputs.forEach((inp) => {
+            const inputId = inp && inp.id ? String(inp.id) : '';
+            if (!inputId) return;
+            const inputQty = toNum(inp.qty);
+            const outIds = outReq.map(o => o.outId);
+            if (!outIds.length) return;
+
+            let running = 0;
+            outIds.forEach((outId, idx) => {
+                const isLast = (idx === outIds.length - 1);
+                let alloc = isLast ? (inputQty - running) : round6(inputQty * (shares[outId] || 0));
+                alloc = round6(alloc);
+                running = round6(running + alloc);
+
+                allocationsByOut[outId].push({
+                    input_item_internalid: Number(inputId),
+                    input_item_quantity: alloc,
+                    input_item_lots: Array.isArray(lotsMap[inputId]) ? lotsMap[inputId] : []
+                });
+            });
+        });
+
+        const workorders = outReq.map((o) => {
+            return {
+                subsidiary: subsidiary ? Number(subsidiary) : subsidiary,
+                location: location ? Number(location) : location,
+                output_item_internalid: Number(o.outId),
+                output_item_quantity: o.qty,
+                inputs: allocationsByOut[o.outId] || []
+            };
+        });
+
+        return { workorders: workorders };
+    }
+
+
+    /**
+     * Lightweight server-side validator for the workorders payload.
+     * NOTE: afterSubmit runs AFTER the record is saved; this validator is for logging/debugging and safety checks
+     * before you wire this into transaction creation.
+     */
+    function validateWorkordersPayload(payload, rawSummary) {
+        const errors = [];
+        const addErr = (code, msg, data) => {
+            errors.push({ code: code, message: msg, data: data || {} });
+        };
+
+        const summary = safeParseJson(rawSummary) || {};
+        const summaryInputs = Array.isArray(summary.inputs) ? summary.inputs : [];
+        const summaryOutputs = Array.isArray(summary.outputs) ? summary.outputs : [];
+
+        if (!payload || typeof payload !== 'object') {
+            addErr('PAYLOAD_MISSING', 'Payload is missing or not an object.');
+            return errors;
+        }
+
+        const workorders = Array.isArray(payload.workorders) ? payload.workorders : [];
+        if (!workorders.length) {
+            addErr('WORKORDERS_EMPTY', 'Payload.workorders is empty.');
+            return errors;
+        }
+
+        // Basic shape validation
+        workorders.forEach((wo, idx) => {
+            const path = 'workorders[' + idx + ']';
+            if (!wo || typeof wo !== 'object') {
+                addErr('WO_NOT_OBJECT', path + ' is not an object.');
+                return;
+            }
+
+            if (wo.subsidiary === '' || wo.subsidiary === null || typeof wo.subsidiary === 'undefined') {
+                addErr('WO_SUBSIDIARY_MISSING', path + '.subsidiary is missing.');
+            }
+            if (wo.location === '' || wo.location === null || typeof wo.location === 'undefined') {
+                addErr('WO_LOCATION_MISSING', path + '.location is missing.');
+            }
+
+            const outId = toNum(wo.output_item_internalid);
+            if (!(outId > 0)) {
+                addErr('WO_OUTPUT_ID_INVALID', path + '.output_item_internalid must be a positive number.', { value: wo.output_item_internalid });
+            }
+
+            const outQty = toNum(wo.output_item_quantity);
+            if (!(outQty > 0)) {
+                addErr('WO_OUTPUT_QTY_INVALID', path + '.output_item_quantity must be > 0.', { value: wo.output_item_quantity });
+            }
+
+            if (!Array.isArray(wo.inputs)) {
+                addErr('WO_INPUTS_NOT_ARRAY', path + '.inputs must be an array.');
+            } else if (!wo.inputs.length) {
+                addErr('WO_INPUTS_EMPTY', path + '.inputs is empty.');
+            } else {
+                wo.inputs.forEach((inp, jdx) => {
+                    const ipath = path + '.inputs[' + jdx + ']';
+                    if (!inp || typeof inp !== 'object') {
+                        addErr('INPUT_NOT_OBJECT', ipath + ' is not an object.');
+                        return;
+                    }
+                    const inId = toNum(inp.input_item_internalid);
+                    if (!(inId > 0)) {
+                        addErr('INPUT_ID_INVALID', ipath + '.input_item_internalid must be a positive number.', { value: inp.input_item_internalid });
+                    }
+                    const inQty = toNum(inp.input_item_quantity);
+                    if (!(inQty >= 0)) {
+                        addErr('INPUT_QTY_INVALID', ipath + '.input_item_quantity must be >= 0.', { value: inp.input_item_quantity });
+                    }
+                    if (typeof inp.input_item_lots !== 'undefined' && !Array.isArray(inp.input_item_lots)) {
+                        addErr('INPUT_LOTS_NOT_ARRAY', ipath + '.input_item_lots must be an array when present.', { valueType: typeof inp.input_item_lots });
+                    }
+                });
+            }
+        });
+
+        // Reconciliation checks (container-level totals)
+        // 1) Total input containers in summary should match total allocated input containers across all workorders (by input item).
+        const expectedByInput = {};
+        summaryInputs.forEach((i) => {
+            const id = i && i.id ? String(i.id) : '';
+            if (!id) return;
+            expectedByInput[id] = round6(toNum(expectedByInput[id]) + toNum(i.qty));
+        });
+
+        const actualByInput = {};
+        workorders.forEach((wo) => {
+            (Array.isArray(wo.inputs) ? wo.inputs : []).forEach((inp) => {
+                const id = inp && inp.input_item_internalid ? String(inp.input_item_internalid) : '';
+                if (!id) return;
+                actualByInput[id] = round6(toNum(actualByInput[id]) + toNum(inp.input_item_quantity));
+            });
+        });
+
+        Object.keys(expectedByInput).forEach((id) => {
+            const exp = round6(toNum(expectedByInput[id]));
+            const act = round6(toNum(actualByInput[id]));
+            if (Math.abs(exp - act) > 0.000001) {
+                addErr('INPUT_TOTAL_MISMATCH', 'Allocated total for input item ' + id + ' does not match summary input qty.', {
+                    input_item_internalid: Number(id),
+                    expected_qty: exp,
+                    actual_allocated_qty: act
+                });
+            }
+        });
+
+        // 2) Total output qty should match summary outputs (by output item).
+        const expectedByOutput = {};
+        summaryOutputs.forEach((o) => {
+            const id = o && o.id ? String(o.id) : '';
+            if (!id) return;
+            expectedByOutput[id] = round6(toNum(expectedByOutput[id]) + toNum(o.qty));
+        });
+
+        const actualByOutput = {};
+        workorders.forEach((wo) => {
+            const id = wo && wo.output_item_internalid ? String(wo.output_item_internalid) : '';
+            if (!id) return;
+            actualByOutput[id] = round6(toNum(actualByOutput[id]) + toNum(wo.output_item_quantity));
+        });
+
+        Object.keys(expectedByOutput).forEach((id) => {
+            const exp = round6(toNum(expectedByOutput[id]));
+            const act = round6(toNum(actualByOutput[id]));
+            if (Math.abs(exp - act) > 0.000001) {
+                addErr('OUTPUT_TOTAL_MISMATCH', 'Workorder output qty for item ' + id + ' does not match summary output qty.', {
+                    output_item_internalid: Number(id),
+                    expected_qty: exp,
+                    actual_qty: act
+                });
+            }
+        });
+
+        // Helpful debug marker
+        try { log.debug({ title: 'COS Repack: validator result', details: JSON.stringify({ errorCount: errors.length }) }); } catch (_e) {}
+
+        return errors;
+    }
+
+    const afterSubmit = (scriptContext) => {
+        try {
+            const newRecord = scriptContext.newRecord;
+            const payload = buildWorkordersPayload(newRecord);
+
+            // Validate against the submitted summary payload (shape + reconciliation checks)
+            const rawSummary = newRecord.getValue({ fieldId: 'custpage_cos_summary_payload' })
+                || newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' })
+                || '';
+            const validationErrors = validateWorkordersPayload(payload, rawSummary);
+
+            if (validationErrors && validationErrors.length) {
+                log.error({
+                    title: 'COS Repack: payload validation failed',
+                    details: JSON.stringify(validationErrors)
+                });
+            }
+
+            log.audit({
+                title: 'COS Repack: workorders payload (debug)',
+                details: JSON.stringify(payload)
+            });
+
+            // Per user preference: log the final output marker
+            try { log.debug({ title: 'COS Repack: afterSubmit complete', details: JSON.stringify({ workorders: (payload.workorders || []).length, errors: (validationErrors || []).length }) }); } catch (_e) {}
+        } catch (e) {
+            try {
+                log.error({ title: 'COS Repack: afterSubmit failed', details: e });
+            } catch (_e) {}
+        }
+    };
+
+    return { beforeLoad, afterSubmit };
 
 });
