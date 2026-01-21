@@ -110,7 +110,7 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
 
 <!-- STEP 2: INPUTS + PURCHASE ORDERS -->
 <div id="cos_step2_wrap" style="display:none;">
-  <div style="display:grid;grid-template-columns: 2fr 1fr;gap:12px;align-items:start;">
+  <div style="display:flex;flex-direction:column;gap:12px;align-items:stretch;">
 
     <!-- INPUTS -->
     <div id="cos_in_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
