@@ -4,7 +4,7 @@
  */
 define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
 
-    const FIELD_SPECIES = 'custrecord_cos_rep_species';
+    const FIELD_SPECIES  = 'custrecord_cos_rep_species';
     const FIELD_LOCATION = 'custrecord_cos_rep_location';
 
     function pushItemsToInlineHtml(items, speciesId) {
@@ -17,51 +17,15 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
                     window.COS_REPACK_UI.setItems(items, meta);
                     return;
                 }
-            } catch (e) {
-                // ignore and retry
-            }
+            } catch (e) {}
 
-            // INLINEHTML can load slightly after client script in NetSuite
-            if (a < 25) {
-                setTimeout(() => tryPush(a + 1), 200);
-            }
+            if (a < 25) setTimeout(() => tryPush(a + 1), 200);
         };
 
         tryPush(0);
     }
 
-
-    function fetchAvailabilityMap(itemIds, locationId) {
-        var map = {};
-        try {
-            if (!locationId || !itemIds || !itemIds.length) return map;
-
-            var s = search.create({
-                type: 'inventorybalance',
-                filters: [
-                    ['item', 'anyof', itemIds],
-                    'AND',
-                    ['location', 'anyof', locationId]
-                ],
-                columns: [
-                    search.createColumn({ name: 'item', summary: search.Summary.GROUP }),
-                    search.createColumn({ name: 'available', summary: search.Summary.SUM })
-                ]
-            });
-
-            s.run().each(function (r) {
-                var itemId = r.getValue({ name: 'item', summary: search.Summary.GROUP });
-                var avail = r.getValue({ name: 'available', summary: search.Summary.SUM });
-                if (itemId) map[String(itemId)] = String(avail || '0');
-                return true;
-            });
-        } catch (e) {
-            // ignore; return empty map
-        }
-        return map;
-    }
-
-    function fetchItemsBySpecies(speciesId, locationId) {
+    function fetchItemsBySpecies(speciesId) {
         if (!speciesId) return [];
 
         const items = [];
@@ -85,24 +49,59 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
             const page = paged.fetch({ index: range.index });
             page.data.forEach((r) => {
                 const id = r.getValue({ name: 'internalid' });
-                const name = r.getValue({ name: 'itemid' });
-                if (id) {
-                    var conv = r.getValue({ name: 'custitem_repack_conversion' });
-                    items.push({ id: String(id), name: String(name || id), conversion: String(conv || '') });
-                }
+                if (!id) return;
+
+                items.push({
+                    id: String(id),
+                    name: String(r.getValue({ name: 'itemid' }) || id),
+                    conversion: String(r.getValue({ name: 'custitem_repack_conversion' }) || '')
+                });
             });
         });
 
-        // Attach availability at the selected location (if provided)
+        return items;
+    }
+
+    function fetchLocationMetricsMap(itemIds, locationId) {
+        const map = {};
+        if (!locationId || !itemIds || !itemIds.length) return map;
+
         try {
-            var ids = items.map(function (it) { return it.id; });
-            var availMap = fetchAvailabilityMap(ids, locationId);
-            items.forEach(function (it) {
-                it.available = availMap[String(it.id)] || '0';
+            const s = search.create({
+                type: search.Type.ITEM,
+                filters: [
+                    ['internalid', 'anyof', itemIds],
+                    'AND',
+                    ['inventorylocation', 'anyof', locationId]
+                ],
+                columns: [
+                    search.createColumn({ name: 'internalid' }),
+                    search.createColumn({ name: 'locationquantityavailable' }),
+                    search.createColumn({ name: 'locationquantityonhand' }),
+                    search.createColumn({ name: 'locationquantitycommitted' }),
+                    search.createColumn({ name: 'locationquantityonorder' }),
+                    search.createColumn({ name: 'locationquantitybackordered' })
+                ]
+            });
+
+            const paged = s.runPaged({ pageSize: 1000 });
+            paged.pageRanges.forEach((range) => {
+                const page = paged.fetch({ index: range.index });
+                page.data.forEach((r) => {
+                    const id = r.getValue({ name: 'internalid' });
+                    if (!id) return;
+                    map[String(id)] = {
+                        available: String(r.getValue({ name: 'locationquantityavailable' }) || '0'),
+                        onhand: String(r.getValue({ name: 'locationquantityonhand' }) || '0'),
+                        committed: String(r.getValue({ name: 'locationquantitycommitted' }) || '0'),
+                        onorder: String(r.getValue({ name: 'locationquantityonorder' }) || '0'),
+                        backordered: String(r.getValue({ name: 'locationquantitybackordered' }) || '0')
+                    };
+                });
             });
         } catch (e) {}
 
-        return items;
+        return map;
     }
 
     function refreshItems() {
@@ -116,14 +115,26 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
                 return;
             }
 
-            const items = fetchItemsBySpecies(speciesId, locationId);
+            const items = fetchItemsBySpecies(speciesId);
+
+            // attach location metrics
+            try {
+                const ids = items.map((it) => it.id);
+                const m = fetchLocationMetricsMap(ids, locationId);
+                items.forEach((it) => {
+                    const row = m[String(it.id)] || {};
+                    it.available = row.available || '0';
+                    it.onhand = row.onhand || '0';
+                    it.committed = row.committed || '0';
+                    it.onorder = row.onorder || '0';
+                    it.backordered = row.backordered || '0';
+                });
+            } catch (ignore) {}
+
             pushItemsToInlineHtml(items, String(speciesId));
         } catch (e) {
-            // If something goes wrong, still push empty so UI doesn't hang
             pushItemsToInlineHtml([], '');
-            try {
-                console.error('COS_CS refreshItems error', e);
-            } catch (ignore) {}
+            try { console.error('COS_CS refreshItems error', e); } catch (ignore) {}
         }
     }
 
@@ -138,8 +149,5 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
         }
     }
 
-    return {
-        pageInit,
-        fieldChanged
-    };
+    return { pageInit, fieldChanged };
 });

@@ -86,11 +86,16 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
     <span id="cos_out_count" style="font-size:12px;color:#333;"></span>
   </div>
 
-  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
     <div></div>
     <div>Item</div>
     <div style="text-align:right;">Qty</div>
     <div style="text-align:right;">Conversion</div>
+    <div style="text-align:right;">Available</div>
+    <div style="text-align:right;">On Hand</div>
+    <div style="text-align:right;">Committed</div>
+    <div style="text-align:right;">On Order</div>
+    <div style="text-align:right;">Backordered</div>
   </div>
 
   <div id="cos_out_rows"></div>
@@ -119,12 +124,16 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         <span id="cos_in_count" style="font-size:12px;color:#333;"></span>
       </div>
 
-      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
         <div></div>
         <div>Item</div>
         <div style="text-align:right;">Qty</div>
         <div style="text-align:right;">Conversion</div>
         <div style="text-align:right;">Available</div>
+        <div style="text-align:right;">On Hand</div>
+        <div style="text-align:right;">Committed</div>
+        <div style="text-align:right;">On Order</div>
+        <div style="text-align:right;">Backordered</div>
         <div style="text-align:right;">Lots</div>
       </div>
 
@@ -179,9 +188,9 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
 </div>
 
 <style>
-  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
 
-  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 120px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
   .cos_tbl_row_input:nth-child(even){background:#fafafa;}
   .cos_tbl_row_input button{padding:6px 10px;cursor:pointer;}
 
@@ -301,7 +310,11 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
           id: String(it.id || it.internalid),
           name: String(it.name || it.itemid || it.text || it.value || it.id),
           conversion: (it.conversion != null ? String(it.conversion) : ''),
-          available: (it.available != null ? String(it.available) : '')
+          available: (it.available != null ? String(it.available) : ''),
+          onhand: (it.onhand != null ? String(it.onhand) : ''),
+          committed: (it.committed != null ? String(it.committed) : ''),
+          onorder: (it.onorder != null ? String(it.onorder) : ''),
+          backordered: (it.backordered != null ? String(it.backordered) : '')
         };
       });
   }
@@ -314,117 +327,70 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
     });
   }
 
-
-  function toNum(v){
-    var n = parseFloat(v);
-    return isNaN(n) ? 0 : n;
-  }
-
+  function toNum(v){ var n = parseFloat(v); return isNaN(n) ? 0 : n; }
   function roundNice(n){
     if (n == null) return '';
     var x = Number(n);
     if (!isFinite(x)) return '';
     var s = String(x);
-    if (s.indexOf('.') >= 0){
-      s = x.toFixed(6).replace(/\.?0+$/,'');
-    }
+    if (s.indexOf('.') >= 0) s = x.toFixed(6).replace(/\.?0+$/,'');
     return s;
   }
 
-  // Auto-suggest inputs based on outputs' total conversion requirement.
-  // Strategy: greedy from highest conversion to lowest, limited by available at location,
-  // excluding any items already selected as outputs.
   function suggestInputs(){
-    try {
+    try{
       var outKeys = Object.keys(outputsSelected);
       if (!outKeys.length) return;
-
       var required = 0;
       outKeys.forEach(function(k){
         var o = outputsSelected[k];
         if (!o) return;
         var it = allItems.find(function(x){ return String(x.id) === String(o.id); });
-        var conv = it ? toNum(it.conversion) : toNum(o.conversion);
-        var qty  = toNum(o.qty);
-        required += (qty * conv);
+        var conv = it ? toNum(it.conversion) : 0;
+        var qty = toNum(o.qty);
+        required += qty * conv;
       });
-
       if (required <= 0) return;
-
       var exclude = {};
       outKeys.forEach(function(k){ exclude[String(k)] = true; });
-
-      var candidates = allItems
-        .filter(function(it){
-          if (!it || !it.id) return false;
-          if (exclude[String(it.id)]) return false;
-          var conv = toNum(it.conversion);
-          var avail = toNum(it.available);
-          return conv > 0 && avail > 0;
-        })
-        .map(function(it){
-          return {
-            id: String(it.id),
-            name: String(it.name || it.id),
-            conv: toNum(it.conversion),
-            avail: toNum(it.available)
-          };
-        });
-
-      if (!candidates.length) return;
-
-      candidates.sort(function(a,b){
-        if (b.conv !== a.conv) return b.conv - a.conv;
-        return a.name.localeCompare(b.name);
-      });
-
+      var candidates = allItems.filter(function(it){
+        if (!it || !it.id) return false;
+        if (exclude[String(it.id)]) return false;
+        return toNum(it.conversion) > 0 && toNum(it.available) > 0;
+      }).map(function(it){
+        return { id:String(it.id), name:String(it.name||it.id), conv:toNum(it.conversion), avail:toNum(it.available) };
+      }).sort(function(a,b){ return (b.conv - a.conv) || a.name.localeCompare(b.name); });
       inputsSelected = {};
-
       var remaining = required;
-
-      for (var i=0;i<candidates.length;i++){
-        if (remaining <= 0) break;
+      for (var i=0;i<candidates.length && remaining > 0;i++){
         var c = candidates[i];
-        if (c.conv <= 0 || c.avail <= 0) continue;
-
         var maxNeed = Math.floor(remaining / c.conv);
         if (maxNeed <= 0) continue;
-
         var useQty = Math.min(maxNeed, Math.floor(c.avail));
         if (useQty <= 0) continue;
-
-        inputsSelected[c.id] = { id: c.id, name: c.name, qty: roundNice(useQty) };
-        remaining -= (useQty * c.conv);
+        inputsSelected[c.id] = { id:c.id, name:c.name, qty: roundNice(useQty) };
+        remaining -= useQty * c.conv;
       }
-
-      if (remaining > 0) {
-        var tail = candidates.slice().sort(function(a,b){
-          if (a.conv !== b.conv) return a.conv - b.conv;
-          return a.name.localeCompare(b.name);
-        });
-
+      if (remaining > 0){
+        var tail = candidates.slice().sort(function(a,b){ return (a.conv - b.conv) || a.name.localeCompare(b.name); });
         for (var j=0;j<tail.length && remaining > 0;j++){
           var t = tail[j];
           var already = inputsSelected[t.id] ? toNum(inputsSelected[t.id].qty) : 0;
           var availLeft = Math.floor(t.avail) - already;
-          if (availLeft <= 0 || t.conv <= 0) continue;
-
+          if (availLeft <= 0) continue;
           var need = Math.ceil(remaining / t.conv);
           if (need <= 0) need = 1;
           var add = Math.min(need, availLeft);
           if (add <= 0) continue;
-
           var newQty = already + add;
-          inputsSelected[t.id] = { id: t.id, name: t.name, qty: roundNice(newQty) };
-          remaining -= (add * t.conv);
+          inputsSelected[t.id] = { id:t.id, name:t.name, qty: roundNice(newQty) };
+          remaining -= add * t.conv;
         }
       }
-
       syncHidden();
       updateCounts();
-    } catch(e) {}
+    }catch(e){}
   }
-
 
   function countSelected(map){
     return Object.keys(map).length;
@@ -515,6 +481,23 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
       cAvail.style.textAlign = 'right';
       cAvail.textContent = (it.available != null ? it.available : '');
 
+      var cOnHand = document.createElement('div');
+      cOnHand.style.textAlign = 'right';
+      cOnHand.textContent = (it.onhand != null ? it.onhand : '');
+
+      var cCommitted = document.createElement('div');
+      cCommitted.style.textAlign = 'right';
+      cCommitted.textContent = (it.committed != null ? it.committed : '');
+
+      var cOnOrder = document.createElement('div');
+      cOnOrder.style.textAlign = 'right';
+      cOnOrder.textContent = (it.onorder != null ? it.onorder : '');
+
+      var cBackordered = document.createElement('div');
+      cBackordered.style.textAlign = 'right';
+      cBackordered.textContent = (it.backordered != null ? it.backordered : '');
+
+
       var c3 = document.createElement('div');
       c3.style.textAlign = 'right';
       var qty = document.createElement('input');
@@ -576,12 +559,21 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
         row.appendChild(c3);
         row.appendChild(cConv);
         row.appendChild(cAvail);
+        row.appendChild(cOnHand);
+        row.appendChild(cCommitted);
+        row.appendChild(cOnOrder);
+        row.appendChild(cBackordered);
         row.appendChild(c4);
       } else {
         row.appendChild(c1);
         row.appendChild(c2);
         row.appendChild(c3);
         row.appendChild(cConv);
+        row.appendChild(cAvail);
+        row.appendChild(cOnHand);
+        row.appendChild(cCommitted);
+        row.appendChild(cOnOrder);
+        row.appendChild(cBackordered);
       }
       rowsEl.appendChild(row);
     });
@@ -665,7 +657,7 @@ function showStep2(){
     if (wrap) wrap.style.display = 'block';
     inputsPrepared = true;
 
-    // Auto-suggest inputs based on output totals and conversions
+    // Auto-suggest inputs when Step 2 is prepared
     suggestInputs();
 
     renderInputs();
