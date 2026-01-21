@@ -22,39 +22,15 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         });
 
 
-        // VIEW MODE: Read-only Repack Summary (no interaction)
+        // VIEW MODE: Read-only Repack Summary (rendered to match the interactive Step 3 UI)
+        // In VIEW mode the user won't interact; we just rebuild the Summary HTML from saved payload fields.
         if (type === scriptContext.UserEventType.VIEW) {
             const rec = scriptContext.newRecord;
-
-            function escapeHtml(str) {
-                return String(str === null || str === undefined ? '' : str)
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;')
-                    .replace(/'/g, '&#39;');
-            }
-
-            function toNum(v) {
-                const n = parseFloat(v);
-                return isNaN(n) ? 0 : n;
-            }
-
-            function fmtQty(v) {
-                const n = toNum(v);
-                return (Math.round(n * 1000000) / 1000000).toString();
-            }
 
             let summaryStr = '';
             let lotsStr = '';
             try { summaryStr = rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''; } catch (e) {}
             try { lotsStr = rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || ''; } catch (e) {}
-
-            let summary = null;
-            let lots = null;
-
-            try { summary = summaryStr ? JSON.parse(summaryStr) : null; } catch (e) { summary = null; }
-            try { lots = lotsStr ? JSON.parse(lotsStr) : null; } catch (e) { lots = null; }
 
             const htmlField = form.addField({
                 id: 'custpage_cos_view_summary_html',
@@ -63,140 +39,271 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
                 container: 'custpage_cos_input_output'
             });
 
-            // Build read-only HTML
-            let html = '';
-            html += '<div style="padding:12px;border:1px solid #ccc;border-radius:6px;margin:10px 0;background:#fff;">';
-            html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">';
-            html += '<div><div style="font-weight:bold;font-size:14px;">Repack Summary</div>';
-            html += '<div style="font-size:12px;color:#666;">View-only summary built from saved payload</div></div>';
-            html += '</div>';
+            // NOTE: we purposely use the same markup + CSS classes as the interactive summary section,
+            // so VIEW mode looks identical and doesn't alienate users.
+            const viewHtml = `
+<div id="cos_summary_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-bottom:12px;">
+  <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
+    <div style="font-weight:bold;">Repack Summary</div>
+    <div style="font-size:12px;opacity:0.9;">Review outputs and inputs before proceeding</div>
+  </div>
 
-            if (!summary || (!summary.outputs && !summary.inputs)) {
-                html += '<div style="margin-top:10px;padding:10px;border:1px solid #f3c200;background:#fff8d6;border-radius:6px;">';
-                html += '<div style="font-weight:bold;">No saved summary payload</div>';
-                html += '<div style="font-size:12px;color:#666;margin-top:4px;">Save the record after building a summary to populate custrecord_cos_rep_summary_payload.</div>';
-                html += '</div>';
-                html += '</div>';
-                htmlField.defaultValue = html;
-                return;
-            }
+  <div id="cos_summary_body" style="background:#fff;"></div>
+</div>
 
-            const outputs = Array.isArray(summary.outputs) ? summary.outputs : [];
-            const inputs  = Array.isArray(summary.inputs) ? summary.inputs : [];
-            const meta    = summary.meta || {};
-            const dist    = summary.distribution || {};
+<style>
+  .cos_empty{padding:10px 12px;color:#666;font-size:12px;}
+  .cos_badge{display:inline-block;padding:2px 6px;border-radius:10px;background:#f1f3f6;font-size:11px;color:#333;}
+  .cos_sum_grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px;}
+  .cos_sum_box{border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;}
+  .cos_sum_box_hdr{padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;}
+  .cos_sum_row{display:grid;grid-template-columns: 2fr 1fr;gap:8px;padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;align-items:center;background:#fff;}
+  .cos_sum_row:nth-child(even){background:#fafafa;}
+  .cos_sum_qty{text-align:right;white-space:nowrap;}
 
-            // Meta
-            html += '<div style="margin-top:10px;font-size:12px;color:#333;">';
-            html += '<div><b>Species</b>: ' + escapeHtml(meta.speciesId || '') + ' &nbsp; <b>Location</b>: ' + escapeHtml(meta.locationId || '') + '</div>';
-            html += '</div>';
+  .cos_dist_wrap{padding:12px;border-top:1px solid #eee;background:#fff;}
+  .cos_dist_title{font-weight:bold;font-size:12px;margin-bottom:6px;}
+  .cos_dist_sub{font-size:12px;color:#666;margin-bottom:10px;line-height:1.4;}
+  .cos_dist_grid{display:grid;grid-template-columns:1fr;gap:12px;}
+  .cos_dist_row{display:grid;grid-template-columns: 2fr 1fr 90px;gap:8px;padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;align-items:center;background:#fff;}
+  .cos_dist_row:nth-child(even){background:#fafafa;}
+  .cos_dist_right{text-align:right;white-space:nowrap;}
+  .cos_dist_small{font-size:11px;color:#666;}
+  .cos_dist_toggle{float:right;cursor:pointer;color:#0070d2;font-size:11px;margin-left:8px;user-select:none;}
+  .cos_dist_body{margin-top:2px;}
+</style>
 
-            // Outputs table
-            html += '<div style="margin-top:12px;border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;">';
-            html += '<div style="padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;">Outputs</div>';
-            html += '<div style="display:grid;grid-template-columns: 2fr 1fr 1fr 1fr;gap:8px;padding:8px 10px;background:#eee;font-size:12px;border-bottom:1px solid #ddd;">';
-            html += '<div>Item</div><div style="text-align:right;">Qty</div><div style="text-align:right;">Conv</div><div style="text-align:right;">Req</div>';
-            html += '</div>';
-            if (!outputs.length) {
-                html += '<div style="padding:10px;font-size:12px;color:#666;">No outputs</div>';
-            } else {
-                outputs.forEach((o, idx) => {
-                    html += '<div style="display:grid;grid-template-columns: 2fr 1fr 1fr 1fr;gap:8px;padding:8px 10px;font-size:12px;border-bottom:1px solid #eee;background:' + (idx % 2 ? '#fafafa' : '#fff') + ';">';
-                    html += '<div>' + escapeHtml(o.name || o.itemName || o.text || ('Item ' + (o.id || ''))) + '</div>';
-                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(o.qty)) + '</div>';
-                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(o.conv)) + '</div>';
-                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(o.req)) + '</div>';
-                    html += '</div>';
-                });
-            }
-            html += '</div>';
+<script>
+(function(){
+  var SUMMARY_RAW = ${JSON.stringify(summaryStr || '')};
+  var LOTS_RAW = ${JSON.stringify(lotsStr || '')};
 
-            // Inputs table
-            html += '<div style="margin-top:12px;border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;">';
-            html += '<div style="padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;">Inputs</div>';
-            html += '<div style="display:grid;grid-template-columns: 2fr 1fr 1fr 1fr;gap:8px;padding:8px 10px;background:#eee;font-size:12px;border-bottom:1px solid #ddd;">';
-            html += '<div>Item</div><div style="text-align:right;">Qty</div><div style="text-align:right;">Conv</div><div style="text-align:right;">Lots</div>';
-            html += '</div>';
-            if (!inputs.length) {
-                html += '<div style="padding:10px;font-size:12px;color:#666;">No inputs</div>';
-            } else {
-                inputs.forEach((i, idx) => {
-                    html += '<div style="display:grid;grid-template-columns: 2fr 1fr 1fr 1fr;gap:8px;padding:8px 10px;font-size:12px;border-bottom:1px solid #eee;background:' + (idx % 2 ? '#fafafa' : '#fff') + ';">';
-                    html += '<div>' + escapeHtml(i.name || i.itemName || i.text || ('Item ' + (i.id || ''))) + '</div>';
-                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(i.qty)) + '</div>';
-                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(i.conv)) + '</div>';
-                    html += '<div style="text-align:right;">' + escapeHtml(String(i.lotCount || 0)) + '</div>';
-                    html += '</div>';
-                });
-            }
-            html += '</div>';
+  function safeParse(raw){
+    try{
+      if (!raw || typeof raw !== 'string') return null;
+      var t = raw.trim();
+      if (!t) return null;
+      var p = JSON.parse(t);
+      if (typeof p === 'string') {
+        try { return JSON.parse(p); } catch(_e) { return p; }
+      }
+      return p;
+    }catch(e){ return null; }
+  }
 
-            // Lots detail (optional)
-            try {
-                const lotMap = lots && typeof lots === 'object' ? lots : {};
-                const lotItemIds = Object.keys(lotMap || {});
-                if (lotItemIds.length) {
-                    html += '<div style="margin-top:12px;border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;">';
-                    html += '<div style="padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;">Selected Lots</div>';
-                    lotItemIds.forEach((itemId) => {
-                        const arr = Array.isArray(lotMap[itemId]) ? lotMap[itemId] : [];
-                        if (!arr.length) return;
-                        const inp = inputs.find(x => String(x.id) === String(itemId));
-                        const itemName = inp ? (inp.name || inp.itemName || inp.text) : ('Item ' + itemId);
-                        html += '<div style="padding:8px 10px;border-top:1px solid #eee;background:#fff;">';
-                        html += '<div style="font-weight:bold;font-size:12px;margin-bottom:6px;">' + escapeHtml(itemName) + '</div>';
-                        html += '<div style="display:grid;grid-template-columns: 2fr 1fr;gap:8px;background:#eee;padding:6px 8px;font-size:12px;border:1px solid #ddd;border-radius:4px;">';
-                        html += '<div>Lot</div><div style="text-align:right;">Qty</div>';
-                        html += '</div>';
-                        arr.forEach((l, idx) => {
-                            html += '<div style="display:grid;grid-template-columns: 2fr 1fr;gap:8px;padding:6px 8px;font-size:12px;border-left:1px solid #ddd;border-right:1px solid #ddd;border-bottom:1px solid #ddd;background:' + (idx % 2 ? '#fafafa' : '#fff') + ';">';
-                            html += '<div>' + escapeHtml(l.lotnumber || l.lot || l.number || l.key || '') + '</div>';
-                            html += '<div style="text-align:right;">' + escapeHtml(fmtQty(l.qty)) + '</div>';
-                            html += '</div>';
-                        });
-                        html += '</div>';
-                    });
-                    html += '</div>';
-                }
-            } catch (e) {}
+  function toNum(v){ var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+  function roundNice(n){
+    var x = Number(n);
+    if (!isFinite(x)) return 0;
+    // match interactive: show integers cleanly, otherwise up to 6 decimals
+    var r = Math.round(x * 1e6) / 1e6;
+    return (Math.abs(r - Math.round(r)) < 1e-9) ? String(Math.round(r)) : String(r);
+  }
 
-            // Distribution summary (optional)
-            try {
-                const alloc = dist.allocations || {};
-                const outIds = Object.keys(alloc || {});
-                if (outIds.length) {
-                    const inputNameById = {};
-                    inputs.forEach(i => { if (i && i.id) inputNameById[String(i.id)] = (i.name || i.itemName || i.text || ('Item ' + i.id)); });
+  function byId(id){ return document.getElementById(id); }
 
-                    const outputNameById = {};
-                    outputs.forEach(o => { if (o && o.id) outputNameById[String(o.id)] = (o.name || o.itemName || o.text || ('Item ' + o.id)); });
+  var summary = safeParse(SUMMARY_RAW) || {};
+  var lotsObj = safeParse(LOTS_RAW) || {};
+  if (!lotsObj || typeof lotsObj !== 'object') lotsObj = {};
 
-                    html += '<div style="margin-top:12px;border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;">';
-                    html += '<div style="padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;">Prorated Input Distribution</div>';
-                    outIds.forEach((outId) => {
-                        const m = alloc[outId] || {};
-                        const inIds = Object.keys(m || {});
-                        if (!inIds.length) return;
-                        html += '<div style="padding:8px 10px;border-top:1px solid #eee;background:#fff;">';
-                        html += '<div style="font-weight:bold;font-size:12px;margin-bottom:6px;">' + escapeHtml(outputNameById[String(outId)] || ('Output ' + outId)) + '</div>';
-                        html += '<div style="display:grid;grid-template-columns: 2fr 1fr;gap:8px;background:#eee;padding:6px 8px;font-size:12px;border:1px solid #ddd;border-radius:4px;">';
-                        html += '<div>Input</div><div style="text-align:right;">Allocated Qty</div>';
-                        html += '</div>';
-                        inIds.forEach((inId, idx) => {
-                            html += '<div style="display:grid;grid-template-columns: 2fr 1fr;gap:8px;padding:6px 8px;font-size:12px;border-left:1px solid #ddd;border-right:1px solid #ddd;border-bottom:1px solid #ddd;background:' + (idx % 2 ? '#fafafa' : '#fff') + ';">';
-                            html += '<div>' + escapeHtml(inputNameById[String(inId)] || ('Input ' + inId)) + '</div>';
-                            html += '<div style="text-align:right;">' + escapeHtml(fmtQty(m[inId])) + '</div>';
-                            html += '</div>';
-                        });
-                        html += '</div>';
-                    });
-                    html += '</div>';
-                }
-            } catch (e) {}
+  // match interactive variable name
+  var inputLotsByItemId = lotsObj;
 
-            html += '</div>';
+  var body = byId('cos_summary_body');
+  if (!body){
+    return;
+  }
 
-            htmlField.defaultValue = html;
+  var outs = Array.isArray(summary.outputs) ? summary.outputs : [];
+  var ins  = Array.isArray(summary.inputs) ? summary.inputs : [];
+
+  if (!outs.length || !ins.length){
+    body.innerHTML = '<div class="cos_empty">No saved summary to display. Build the summary and save the record.</div>';
+    return;
+  }
+
+  function normalizeRow(r){
+    if (!r) return { id:'', name:'', qty:'' };
+    return {
+      id: (r.id != null ? String(r.id) : ''),
+      name: (r.name || r.itemName || r.text || ''),
+      qty: (r.qty != null ? String(r.qty) : '')
+    };
+  }
+
+  outs = outs.map(normalizeRow);
+  ins  = ins.map(normalizeRow);
+
+  function buildBox(title, rows){
+    var html = '';
+    html += '<div class="cos_sum_box">';
+    html += '<div class="cos_sum_box_hdr">' + title + ' <span class="cos_badge">' + rows.length + '</span></div>';
+    rows.forEach(function(r){
+      html += '<div class="cos_sum_row">';
+      html += '<div>' + (r.name || '') + '</div>';
+      html += '<div class="cos_sum_qty">' + (r.qty || '') + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  // Shares / requirements
+  // Prefer saved distribution.shares if present, otherwise compute like interactive:
+  // share based on reqBase = qty * conv, fallback to qty if missing.
+  var outReqs = [];
+  var totalReqBase = 0;
+
+  var outConvById = {};
+  try{
+    var convMap = (summary && summary.meta && summary.meta.conversions) ? summary.meta.conversions : null;
+    if (convMap && typeof convMap === 'object') outConvById = convMap;
+  }catch(e){}
+
+  outs.forEach(function(o){
+    var qty = toNum(o.qty);
+    var conv = 0;
+    // payload enrichment may store conv on each output row
+    if (summary && Array.isArray(summary.outputs)){
+      try{
+        for (var i=0;i<summary.outputs.length;i++){
+          var so = summary.outputs[i];
+          if (so && String(so.id) === String(o.id) && so.conv != null){
+            conv = toNum(so.conv);
+            break;
+          }
+        }
+      }catch(e){}
+    }
+    if (!conv && outConvById && outConvById[String(o.id)] != null){
+      conv = toNum(outConvById[String(o.id)]);
+    }
+    var reqBase = qty * conv;
+    outReqs.push({ id:o.id, name:o.name, qty:o.qty, conv:conv, reqBase:reqBase, share:0 });
+    totalReqBase += reqBase;
+  });
+
+  if (totalReqBase <= 0){
+    totalReqBase = 0;
+    outReqs.forEach(function(or){
+      var q = toNum(or.qty);
+      or.reqBase = q;
+      totalReqBase += q;
+    });
+  }
+
+  outReqs.forEach(function(or){
+    or.share = (totalReqBase > 0) ? (or.reqBase / totalReqBase) : 0;
+  });
+
+  // Allocation map: prefer saved distribution.allocations, else compute like interactive
+  var allocMap = {};
+  try{
+    if (summary && summary.distribution && summary.distribution.allocations && typeof summary.distribution.allocations === 'object'){
+      allocMap = summary.distribution.allocations;
+    }
+  }catch(e){}
+  if (!allocMap || typeof allocMap !== 'object') allocMap = {};
+
+  // If allocMap is empty, compute
+  if (!Object.keys(allocMap).length){
+    outReqs.forEach(function(or){ allocMap[String(or.id)] = {}; });
+
+    ins.forEach(function(inp){
+      var inQty = toNum(inp.qty);
+      var running = 0;
+      for (var i=0;i<outReqs.length;i++){
+        var or = outReqs[i];
+        var q = 0;
+        if (i === outReqs.length - 1){
+          q = inQty - running;
+        } else {
+          q = inQty * (or.share || 0);
+          q = toNum(roundNice(q));
+          running += q;
+        }
+        allocMap[String(or.id)][String(inp.id)] = q;
+      }
+    });
+  }
+
+  function buildDistBoxUsingMap(outReq){
+    var html = '';
+    html += '<div class="cos_sum_box">';
+    html += '<div class="cos_sum_box_hdr">'
+         +  (outReq.name || '') + ' <span class="cos_badge">' + (outReq.qty || '') + '</span>'
+         +  ' <span class="cos_dist_small">(' + roundNice((outReq.share || 0) * 100) + '%)</span>'
+         +  ' <span class="cos_dist_toggle" data-outid="' + (outReq.id || '') + '">Hide inputs</span></div>';
+
+    html += '<div class="cos_dist_row" style="font-weight:bold;background:#f7f7f7;">'
+         +  '<div>Input</div><div class="cos_dist_right">Allocated Qty</div><div class="cos_dist_right">Lots</div>'
+         +  '</div>';
+
+    html += '<div id="cos_dist_body_' + (outReq.id || '') + '" class="cos_dist_body">';
+
+    ins.forEach(function(inp){
+      var q = (allocMap[String(outReq.id)] && allocMap[String(outReq.id)][String(inp.id)] != null)
+        ? allocMap[String(outReq.id)][String(inp.id)]
+        : 0;
+
+      var lotArr = inputLotsByItemId[String(inp.id)] || [];
+      var lotCount = lotArr && lotArr.length ? String(lotArr.length) : '';
+
+      html += '<div class="cos_dist_row">'
+           +  '<div>' + (inp.name || '') + '</div>'
+           +  '<div class="cos_dist_right">' + roundNice(q) + '</div>'
+           +  '<div class="cos_dist_right">' + (lotCount ? ('(' + lotCount + ')') : '') + '</div>'
+           +  '</div>';
+    });
+
+    html += '</div>'; // .cos_dist_body
+    html += '</div>';
+    return html;
+  }
+
+  function bindDistToggles2(){
+    try{
+      var toggles = document.querySelectorAll('.cos_dist_toggle');
+      if (!toggles || !toggles.length) return;
+      toggles.forEach(function(t){
+        if (t._cosBound) return;
+        t._cosBound = true;
+        t.addEventListener('click', function(){
+          var outId = t.getAttribute('data-outid') || '';
+          if (!outId) return;
+          var bodyEl = byId('cos_dist_body_' + outId);
+          if (!bodyEl) return;
+          var hidden = (bodyEl.style.display === 'none');
+          bodyEl.style.display = hidden ? 'block' : 'none';
+          t.textContent = hidden ? 'Hide inputs' : 'Show inputs';
+        });
+      });
+    }catch(e){}
+  }
+
+  var html2 = '';
+  html2 += '<div class="cos_sum_grid">';
+  html2 += buildBox('Outputs', outs);
+  html2 += buildBox('Inputs', ins);
+  html2 += '</div>';
+
+  html2 += '<div class="cos_dist_wrap">';
+  html2 += '<div class="cos_dist_title">Prorated Distribution of Inputs → Outputs</div>';
+  html2 += '<div class="cos_dist_sub">Inputs are distributed across outputs based on each of their share of the total requirement (Qty × Conversion). If conversions are missing, the share falls back to output quantities.</div>';
+  html2 += '<div class="cos_dist_grid">';
+  outReqs.forEach(function(or){
+    html2 += buildDistBoxUsingMap(or);
+  });
+  html2 += '</div>';
+  html2 += '</div>';
+
+  body.innerHTML = html2;
+  bindDistToggles2();
+
+})();
+</script>
+`;
+            htmlField.defaultValue = viewHtml;
 
             // No interactive UI in VIEW mode
             return;
