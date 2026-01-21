@@ -206,6 +206,15 @@ define(['N/ui/serverWidget','N/url'], (serverWidget, url) => {
   .cos_sum_row{display:grid;grid-template-columns: 2fr 1fr;gap:8px;padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;align-items:center;background:#fff;}
   .cos_sum_row:nth-child(even){background:#fafafa;}
   .cos_sum_qty{text-align:right;white-space:nowrap;}
+.cos_dist_wrap{padding:12px;border-top:1px solid #eee;background:#fff;}
+  .cos_dist_title{font-weight:bold;font-size:12px;margin-bottom:6px;}
+  .cos_dist_sub{font-size:12px;color:#666;margin-bottom:10px;line-height:1.4;}
+  .cos_dist_grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .cos_dist_row{display:grid;grid-template-columns: 2fr 1fr 90px;gap:8px;padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;align-items:center;background:#fff;}
+  .cos_dist_row:nth-child(even){background:#fafafa;}
+  .cos_dist_right{text-align:right;white-space:nowrap;}
+  .cos_dist_small{font-size:11px;color:#666;}
+
 </style>
 
 <script>
@@ -689,10 +698,136 @@ function showStep2(){
       html += '<div class="cos_sum_box_hdr">' + title + ' <span class="cos_badge">' + rows.length + '</span></div>';
       rows.forEach(function(r){
         html += '<div class="cos_sum_row">';
-        html += '<div>' + r.name + '</div>';
+        html += '<div>' + (r.name || '') + '</div>';
         html += '<div class="cos_sum_qty">' + (r.qty || '') + '</div>';
         html += '</div>';
       });
+      html += '</div>';
+      return html;
+    }
+
+    // Build prorated input distribution per output (based on output base requirement share)
+    function getItemById(id){
+      try{
+        for (var i=0;i<allItems.length;i++){
+          if (String(allItems[i].id) === String(id)) return allItems[i];
+        }
+      }catch(e){}
+      return null;
+    }
+
+    var outReqs = [];
+    var totalReqBase = 0;
+    outs.forEach(function(o){
+      var it = getItemById(o.id);
+      var conv = it ? toNum(it.conversion) : 0;
+      var qty = toNum(o.qty);
+      var reqBase = qty * conv;
+      outReqs.push({ id:o.id, name:o.name, qty:o.qty, conv:conv, reqBase:reqBase });
+      totalReqBase += reqBase;
+    });
+
+    // Fallback: if conversions are missing/zero, prorate by output qty instead of base
+    if (totalReqBase <= 0){
+      totalReqBase = 0;
+      outReqs.forEach(function(or){
+        var q = toNum(or.qty);
+        or.reqBase = q;
+        totalReqBase += q;
+      });
+    }
+
+    // shares
+    outReqs.forEach(function(or){
+      or.share = (totalReqBase > 0) ? (or.reqBase / totalReqBase) : 0;
+    });
+
+    // allocate each input qty across outputs by share (with rounding adjustment per input)
+    function buildDistBox(outReq){
+      var html = '';
+      html += '<div class="cos_sum_box">';
+      html += '<div class="cos_sum_box_hdr">'
+           +  (outReq.name || '') + ' <span class="cos_badge">' + (outReq.qty || '') + '</span>'
+           +  ' <span class="cos_dist_small">(' + roundNice((outReq.share || 0) * 100) + '%)</span>'
+           +  '</div>';
+
+      // header row
+      html += '<div class="cos_dist_row" style="font-weight:bold;background:#f7f7f7;">'
+           +  '<div>Input</div><div class="cos_dist_right">Allocated Qty</div><div class="cos_dist_right">Lots</div>'
+           +  '</div>';
+
+      ins.forEach(function(inp){
+        var inQty = toNum(inp.qty);
+        var allocQty = inQty * (outReq.share || 0);
+
+        // rounding: keep display nice but stable
+        var dispAlloc = roundNice(allocQty);
+
+        // lots count for this input item
+        var lotArr = inputLotsByItemId[String(inp.id)] || [];
+        var lotCount = lotArr && lotArr.length ? String(lotArr.length) : '';
+
+        html += '<div class="cos_dist_row">'
+             +  '<div>' + (inp.name || '') + '</div>'
+             +  '<div class="cos_dist_right">' + dispAlloc + '</div>'
+             +  '<div class="cos_dist_right">' + (lotCount ? ('(' + lotCount + ')') : '') + '</div>'
+             +  '</div>';
+      });
+
+      html += '</div>';
+      return html;
+    }
+
+    // Optional per-input rounding adjustment to ensure totals match input qty (only affects display)
+    // We do it here by rebuilding an allocation map, then reading it when rendering boxes.
+    var allocMap = {}; // outId -> inId -> qty
+    outReqs.forEach(function(or){ allocMap[String(or.id)] = {}; });
+
+    ins.forEach(function(inp){
+      var inQty = toNum(inp.qty);
+      var running = 0;
+      for (var i=0;i<outReqs.length;i++){
+        var or = outReqs[i];
+        var q = 0;
+        if (i === outReqs.length - 1){
+          q = inQty - running;
+        } else {
+          q = inQty * (or.share || 0);
+          // round intermediate to reduce floating drift
+          q = toNum(roundNice(q));
+          running += q;
+        }
+        allocMap[String(or.id)][String(inp.id)] = q;
+      }
+    });
+
+    function buildDistBoxUsingMap(outReq){
+      var html = '';
+      html += '<div class="cos_sum_box">';
+      html += '<div class="cos_sum_box_hdr">'
+           +  (outReq.name || '') + ' <span class="cos_badge">' + (outReq.qty || '') + '</span>'
+           +  ' <span class="cos_dist_small">(' + roundNice((outReq.share || 0) * 100) + '%)</span>'
+           +  '</div>';
+
+      html += '<div class="cos_dist_row" style="font-weight:bold;background:#f7f7f7;">'
+           +  '<div>Input</div><div class="cos_dist_right">Allocated Qty</div><div class="cos_dist_right">Lots</div>'
+           +  '</div>';
+
+      ins.forEach(function(inp){
+        var q = (allocMap[String(outReq.id)] && allocMap[String(outReq.id)][String(inp.id)] != null)
+          ? allocMap[String(outReq.id)][String(inp.id)]
+          : 0;
+
+        var lotArr = inputLotsByItemId[String(inp.id)] || [];
+        var lotCount = lotArr && lotArr.length ? String(lotArr.length) : '';
+
+        html += '<div class="cos_dist_row">'
+             +  '<div>' + (inp.name || '') + '</div>'
+             +  '<div class="cos_dist_right">' + roundNice(q) + '</div>'
+             +  '<div class="cos_dist_right">' + (lotCount ? ('(' + lotCount + ')') : '') + '</div>'
+             +  '</div>';
+      });
+
       html += '</div>';
       return html;
     }
@@ -701,6 +836,17 @@ function showStep2(){
     html2 += '<div class="cos_sum_grid">';
     html2 += buildBox('Outputs', outs);
     html2 += buildBox('Inputs', ins);
+    html2 += '</div>';
+
+    // Distribution section
+    html2 += '<div class="cos_dist_wrap">';
+    html2 += '<div class="cos_dist_title">Prorated Distribution of Inputs → Outputs</div>';
+    html2 += '<div class="cos_dist_sub">Inputs are distributed across outputs based on each of their share of the total requirement (Qty × Conversion). If conversions are missing, the share falls back to output quantities.</div>';
+    html2 += '<div class="cos_dist_grid">';
+    outReqs.forEach(function(or){
+      html2 += buildDistBoxUsingMap(or);
+    });
+    html2 += '</div>';
     html2 += '</div>';
 
     body.innerHTML = html2;
