@@ -3,7 +3,7 @@
  * @NScriptType UserEventScript
  */
 
-define(['N/ui/serverWidget','N/url','N/search','N/log'], (serverWidget, url, search, log) => {
+define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidget, url, search, log, record) => {
 
     const beforeLoad = (scriptContext) => {
         const { form, type } = scriptContext;
@@ -1286,8 +1286,10 @@ function showStep2(){
         return errors;
     }
 
+    var globalScriptContext = null;
     const afterSubmit = (scriptContext) => {
         try {
+            globalScriptContext = scriptContext;
             const newRecord = scriptContext.newRecord;
             const payload = buildWorkordersPayload(newRecord);
 
@@ -1302,12 +1304,25 @@ function showStep2(){
                     title: 'COS Repack: payload validation failed',
                     details: JSON.stringify(validationErrors)
                 });
+
+                // Safety: do NOT create Work Orders if validation fails.
+                try { log.debug({ title: 'COS Repack: workorder creation skipped', details: 'Validation errors present.' }); } catch (_e) {}
+                return;
             }
 
             log.audit({
                 title: 'COS Repack: workorders payload (debug)',
                 details: JSON.stringify(payload)
             });
+
+            // Create Work Orders
+            const createdWorkOrders = createWorkOrdersFromPayload(payload);
+            try {
+                log.audit({
+                    title: 'COS Repack: workorders created',
+                    details: JSON.stringify(createdWorkOrders)
+                });
+            } catch (_e) {}
 
             // Per user preference: log the final output marker
             try { log.debug({ title: 'COS Repack: afterSubmit complete', details: JSON.stringify({ workorders: (payload.workorders || []).length, errors: (validationErrors || []).length }) }); } catch (_e) {}
@@ -1317,6 +1332,107 @@ function showStep2(){
             } catch (_e) {}
         }
     };
+
+    /**
+     * Create Work Orders from validated payload.
+     * Notes:
+     * - Lots are intentionally not applied here; inventory detail is typically applied during issue/build.
+     * - Component lines are added to the WO's item sublist to match the chosen inputs.
+     */
+    function createWorkOrdersFromPayload(payload) {
+        const results = [];
+        const workorders = (payload && payload.workorders) ? payload.workorders : [];
+
+        workorders.forEach((woObj, idx) => {
+            const contextInfo = { index: idx, output_item_internalid: woObj && woObj.output_item_internalid };
+            try {
+                const woRec = record.create({ type: record.Type.WORK_ORDER, isDynamic: true });
+
+                // Header fields (set subsidiary first, then item)
+                if (woObj.subsidiary) {
+                    try { woRec.setValue({ fieldId: 'subsidiary', value: Number(woObj.subsidiary) }); } catch (_e) {}
+                }
+
+                // Required scheduling fields
+                try { woRec.setValue({ fieldId: 'enddate', value: new Date() }); } catch (_e) {}
+
+                // Work Order item field is commonly 'assemblyitem' (preferred); some accounts expose 'item'.
+                try {
+                    woRec.setValue({ fieldId: 'assemblyitem', value: Number(woObj.output_item_internalid) });
+                } catch (_e) {
+                    woRec.setValue({ fieldId: 'item', value: Number(woObj.output_item_internalid) });
+                }
+
+                woRec.setValue({ fieldId: 'quantity', value: Number(woObj.output_item_quantity) });
+                if (woObj.location) {
+                    try { woRec.setValue({ fieldId: 'location', value: Number(woObj.location) }); } catch (_e) {}
+                }
+
+                if(globalScriptContext.newRecord.id)
+                {
+                    try
+                    {
+                        woRec.setValue({ fieldId: 'custbody_cos_createdfromrepack', value: Number(globalScriptContext.newRecord.id) });
+                    }
+                    catch(e)
+                    {
+                        log.error("ERROR in retrieving and setting WO repack internalid", e)
+                    }
+                }
+
+
+                // Components (wipe defaults, then repopulate from payload)
+                try {
+                    const existingLineCount = woRec.getLineCount({ sublistId: 'item' }) || 0;
+                    for (let i = existingLineCount - 1; i >= 0; i--) {
+                        try { woRec.removeLine({ sublistId: 'item', line: i, ignoreRecalc: true }); } catch (_e) {}
+                    }
+                } catch (_e) {}
+
+                // Components
+                const inputs = (woObj && woObj.inputs) ? woObj.inputs : [];
+                inputs.forEach((inp) => {
+                    if (!inp || !inp.input_item_internalid) return;
+                    const qty = Number(inp.input_item_quantity || 0);
+                    if (qty <= 0) return;
+
+                    try {
+                        woRec.selectNewLine({ sublistId: 'item' });
+                        woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'item', value: Number(inp.input_item_internalid) });
+
+                        // Blank out allocation strategies (value 2)
+                        try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
+                        try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
+
+                        woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
+                        woRec.commitLine({ sublistId: 'item' });
+                    } catch (lineErr) {
+                        // If item sublist isn't editable (BOM-driven), we still allow WO creation and log the issue.
+                        try {
+                            log.error({
+                                title: 'COS Repack: component line add failed',
+                                details: JSON.stringify({ ...contextInfo, input_item_internalid: inp.input_item_internalid, error: String(lineErr) })
+                            });
+                        } catch (_e) {}
+                    }
+                });
+
+                const woId = woRec.save({ enableSourcing: true, ignoreMandatoryFields: false });
+                results.push({ index: idx, workorderId: woId, output_item_internalid: woObj.output_item_internalid, output_item_quantity: woObj.output_item_quantity });
+
+            } catch (err) {
+                try {
+                    log.error({
+                        title: 'COS Repack: workorder create failed',
+                        details: JSON.stringify({ ...contextInfo, error: String(err) })
+                    });
+                } catch (_e) {}
+                results.push({ index: idx, workorderId: null, output_item_internalid: woObj && woObj.output_item_internalid, error: String(err) });
+            }
+        });
+
+        return results;
+    }
 
     return { beforeLoad, afterSubmit };
 
