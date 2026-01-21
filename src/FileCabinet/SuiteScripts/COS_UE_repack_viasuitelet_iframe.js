@@ -21,7 +21,188 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
             label: 'Repack Builder'
         });
 
-        // Keep client-side UX: item list updates on fieldChanged/pageInit
+
+        // VIEW MODE: Read-only Repack Summary (no interaction)
+        if (type === scriptContext.UserEventType.VIEW) {
+            const rec = scriptContext.newRecord;
+
+            function escapeHtml(str) {
+                return String(str === null || str === undefined ? '' : str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            function toNum(v) {
+                const n = parseFloat(v);
+                return isNaN(n) ? 0 : n;
+            }
+
+            function fmtQty(v) {
+                const n = toNum(v);
+                return (Math.round(n * 1000000) / 1000000).toString();
+            }
+
+            let summaryStr = '';
+            let lotsStr = '';
+            try { summaryStr = rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''; } catch (e) {}
+            try { lotsStr = rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || ''; } catch (e) {}
+
+            let summary = null;
+            let lots = null;
+
+            try { summary = summaryStr ? JSON.parse(summaryStr) : null; } catch (e) { summary = null; }
+            try { lots = lotsStr ? JSON.parse(lotsStr) : null; } catch (e) { lots = null; }
+
+            const htmlField = form.addField({
+                id: 'custpage_cos_view_summary_html',
+                type: serverWidget.FieldType.INLINEHTML,
+                label: ' ',
+                container: 'custpage_cos_input_output'
+            });
+
+            // Build read-only HTML
+            let html = '';
+            html += '<div style="padding:12px;border:1px solid #ccc;border-radius:6px;margin:10px 0;background:#fff;">';
+            html += '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;">';
+            html += '<div><div style="font-weight:bold;font-size:14px;">Repack Summary</div>';
+            html += '<div style="font-size:12px;color:#666;">View-only summary built from saved payload</div></div>';
+            html += '</div>';
+
+            if (!summary || (!summary.outputs && !summary.inputs)) {
+                html += '<div style="margin-top:10px;padding:10px;border:1px solid #f3c200;background:#fff8d6;border-radius:6px;">';
+                html += '<div style="font-weight:bold;">No saved summary payload</div>';
+                html += '<div style="font-size:12px;color:#666;margin-top:4px;">Save the record after building a summary to populate custrecord_cos_rep_summary_payload.</div>';
+                html += '</div>';
+                html += '</div>';
+                htmlField.defaultValue = html;
+                return;
+            }
+
+            const outputs = Array.isArray(summary.outputs) ? summary.outputs : [];
+            const inputs  = Array.isArray(summary.inputs) ? summary.inputs : [];
+            const meta    = summary.meta || {};
+            const dist    = summary.distribution || {};
+
+            // Meta
+            html += '<div style="margin-top:10px;font-size:12px;color:#333;">';
+            html += '<div><b>Species</b>: ' + escapeHtml(meta.speciesId || '') + ' &nbsp; <b>Location</b>: ' + escapeHtml(meta.locationId || '') + '</div>';
+            html += '</div>';
+
+            // Outputs table
+            html += '<div style="margin-top:12px;border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;">';
+            html += '<div style="padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;">Outputs</div>';
+            html += '<div style="display:grid;grid-template-columns: 2fr 1fr 1fr 1fr;gap:8px;padding:8px 10px;background:#eee;font-size:12px;border-bottom:1px solid #ddd;">';
+            html += '<div>Item</div><div style="text-align:right;">Qty</div><div style="text-align:right;">Conv</div><div style="text-align:right;">Req</div>';
+            html += '</div>';
+            if (!outputs.length) {
+                html += '<div style="padding:10px;font-size:12px;color:#666;">No outputs</div>';
+            } else {
+                outputs.forEach((o, idx) => {
+                    html += '<div style="display:grid;grid-template-columns: 2fr 1fr 1fr 1fr;gap:8px;padding:8px 10px;font-size:12px;border-bottom:1px solid #eee;background:' + (idx % 2 ? '#fafafa' : '#fff') + ';">';
+                    html += '<div>' + escapeHtml(o.name || o.itemName || o.text || ('Item ' + (o.id || ''))) + '</div>';
+                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(o.qty)) + '</div>';
+                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(o.conv)) + '</div>';
+                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(o.req)) + '</div>';
+                    html += '</div>';
+                });
+            }
+            html += '</div>';
+
+            // Inputs table
+            html += '<div style="margin-top:12px;border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;">';
+            html += '<div style="padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;">Inputs</div>';
+            html += '<div style="display:grid;grid-template-columns: 2fr 1fr 1fr 1fr;gap:8px;padding:8px 10px;background:#eee;font-size:12px;border-bottom:1px solid #ddd;">';
+            html += '<div>Item</div><div style="text-align:right;">Qty</div><div style="text-align:right;">Conv</div><div style="text-align:right;">Lots</div>';
+            html += '</div>';
+            if (!inputs.length) {
+                html += '<div style="padding:10px;font-size:12px;color:#666;">No inputs</div>';
+            } else {
+                inputs.forEach((i, idx) => {
+                    html += '<div style="display:grid;grid-template-columns: 2fr 1fr 1fr 1fr;gap:8px;padding:8px 10px;font-size:12px;border-bottom:1px solid #eee;background:' + (idx % 2 ? '#fafafa' : '#fff') + ';">';
+                    html += '<div>' + escapeHtml(i.name || i.itemName || i.text || ('Item ' + (i.id || ''))) + '</div>';
+                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(i.qty)) + '</div>';
+                    html += '<div style="text-align:right;">' + escapeHtml(fmtQty(i.conv)) + '</div>';
+                    html += '<div style="text-align:right;">' + escapeHtml(String(i.lotCount || 0)) + '</div>';
+                    html += '</div>';
+                });
+            }
+            html += '</div>';
+
+            // Lots detail (optional)
+            try {
+                const lotMap = lots && typeof lots === 'object' ? lots : {};
+                const lotItemIds = Object.keys(lotMap || {});
+                if (lotItemIds.length) {
+                    html += '<div style="margin-top:12px;border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;">';
+                    html += '<div style="padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;">Selected Lots</div>';
+                    lotItemIds.forEach((itemId) => {
+                        const arr = Array.isArray(lotMap[itemId]) ? lotMap[itemId] : [];
+                        if (!arr.length) return;
+                        const inp = inputs.find(x => String(x.id) === String(itemId));
+                        const itemName = inp ? (inp.name || inp.itemName || inp.text) : ('Item ' + itemId);
+                        html += '<div style="padding:8px 10px;border-top:1px solid #eee;background:#fff;">';
+                        html += '<div style="font-weight:bold;font-size:12px;margin-bottom:6px;">' + escapeHtml(itemName) + '</div>';
+                        html += '<div style="display:grid;grid-template-columns: 2fr 1fr;gap:8px;background:#eee;padding:6px 8px;font-size:12px;border:1px solid #ddd;border-radius:4px;">';
+                        html += '<div>Lot</div><div style="text-align:right;">Qty</div>';
+                        html += '</div>';
+                        arr.forEach((l, idx) => {
+                            html += '<div style="display:grid;grid-template-columns: 2fr 1fr;gap:8px;padding:6px 8px;font-size:12px;border-left:1px solid #ddd;border-right:1px solid #ddd;border-bottom:1px solid #ddd;background:' + (idx % 2 ? '#fafafa' : '#fff') + ';">';
+                            html += '<div>' + escapeHtml(l.lotnumber || l.lot || l.number || l.key || '') + '</div>';
+                            html += '<div style="text-align:right;">' + escapeHtml(fmtQty(l.qty)) + '</div>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+            } catch (e) {}
+
+            // Distribution summary (optional)
+            try {
+                const alloc = dist.allocations || {};
+                const outIds = Object.keys(alloc || {});
+                if (outIds.length) {
+                    const inputNameById = {};
+                    inputs.forEach(i => { if (i && i.id) inputNameById[String(i.id)] = (i.name || i.itemName || i.text || ('Item ' + i.id)); });
+
+                    const outputNameById = {};
+                    outputs.forEach(o => { if (o && o.id) outputNameById[String(o.id)] = (o.name || o.itemName || o.text || ('Item ' + o.id)); });
+
+                    html += '<div style="margin-top:12px;border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;">';
+                    html += '<div style="padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;">Prorated Input Distribution</div>';
+                    outIds.forEach((outId) => {
+                        const m = alloc[outId] || {};
+                        const inIds = Object.keys(m || {});
+                        if (!inIds.length) return;
+                        html += '<div style="padding:8px 10px;border-top:1px solid #eee;background:#fff;">';
+                        html += '<div style="font-weight:bold;font-size:12px;margin-bottom:6px;">' + escapeHtml(outputNameById[String(outId)] || ('Output ' + outId)) + '</div>';
+                        html += '<div style="display:grid;grid-template-columns: 2fr 1fr;gap:8px;background:#eee;padding:6px 8px;font-size:12px;border:1px solid #ddd;border-radius:4px;">';
+                        html += '<div>Input</div><div style="text-align:right;">Allocated Qty</div>';
+                        html += '</div>';
+                        inIds.forEach((inId, idx) => {
+                            html += '<div style="display:grid;grid-template-columns: 2fr 1fr;gap:8px;padding:6px 8px;font-size:12px;border-left:1px solid #ddd;border-right:1px solid #ddd;border-bottom:1px solid #ddd;background:' + (idx % 2 ? '#fafafa' : '#fff') + ';">';
+                            html += '<div>' + escapeHtml(inputNameById[String(inId)] || ('Input ' + inId)) + '</div>';
+                            html += '<div style="text-align:right;">' + escapeHtml(fmtQty(m[inId])) + '</div>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+            } catch (e) {}
+
+            html += '</div>';
+
+            htmlField.defaultValue = html;
+
+            // No interactive UI in VIEW mode
+            return;
+        }
+
+// Keep client-side UX: item list updates on fieldChanged/pageInit
         form.clientScriptModulePath = './COS_CS_repack_viasuitelet.js';
 
         // UI-only payload fields
@@ -1287,6 +1468,165 @@ function showStep2(){
     }
 
     var globalScriptContext = null;
+
+
+    /**
+     * Persist UI payloads from custpage hidden fields into real record fields so they survive reloads.
+     * Also enrich the Summary payload so VIEW mode can rebuild the Repack Summary without needing client-side calculations.
+     */
+    const beforeSubmit = (context) => {
+        try {
+            const rec = context.newRecord;
+            const type = (context.type || '').toString();
+
+            // Only relevant for create/edit/xedit (ignore delete)
+            if (type === context.UserEventType.DELETE) return;
+
+            const rawSummary = rec.getValue({ fieldId: 'custpage_cos_summary_payload' });
+            const rawLots = rec.getValue({ fieldId: 'custpage_cos_input_lots_payload' });
+
+            // If custpage fields are unavailable (csv/web services), fall back to existing stored payloads
+            const summaryStr = (rawSummary !== null && rawSummary !== undefined)
+                ? String(rawSummary || '')
+                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '');
+
+            const lotsStr = (rawLots !== null && rawLots !== undefined)
+                ? String(rawLots || '')
+                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '');
+
+            const summary = safeParseJson(summaryStr) || {};
+            const lotsMap = safeParseJson(lotsStr) || {};
+
+            // Enrich summary if it looks like a valid snapshot (has outputs/inputs arrays)
+            let finalSummaryStr = summaryStr;
+            try {
+                const outputs = Array.isArray(summary.outputs) ? summary.outputs : [];
+                const inputs = Array.isArray(summary.inputs) ? summary.inputs : [];
+
+                if (outputs.length || inputs.length) {
+                    const subsidiary = rec.getValue({ fieldId: 'custrecord_cos_rep_subsidiary' }) || '';
+                    const location = rec.getValue({ fieldId: 'custrecord_cos_rep_location' }) || '';
+                    const species = rec.getValue({ fieldId: 'custrecord_cos_rep_species' }) || '';
+
+                    // Gather itemIds for conversion lookup
+                    const itemIds = [];
+                    outputs.forEach(o => { if (o && o.id) itemIds.push(String(o.id)); });
+                    inputs.forEach(i => { if (i && i.id) itemIds.push(String(i.id)); });
+
+                    const convMap = fetchConversionMap(itemIds);
+
+                    // Compute output requirements + shares (same logic used for WO allocation)
+                    const outReq = outputs.map((o) => {
+                        const outId = o && o.id ? String(o.id) : '';
+                        const qty = toNum(o && o.qty);
+                        const conv = convMap[outId] || 0;
+                        const req = (conv > 0) ? (qty * conv) : qty;
+                        return { outId, qty, conv, req };
+                    }).filter(x => x.outId);
+
+                    const totalReq = outReq.reduce((a, b) => a + toNum(b.req), 0);
+                    const shares = {};
+                    outReq.forEach((o) => {
+                        shares[o.outId] = totalReq > 0 ? (toNum(o.req) / totalReq) : 0;
+                    });
+
+                    // Build allocations map: output -> input -> allocatedQty
+                    const allocations = {}; // { [outId]: { [inputId]: qty } }
+                    outReq.forEach(o => { allocations[o.outId] = {}; });
+
+                    inputs.forEach((inp) => {
+                        const inputId = inp && inp.id ? String(inp.id) : '';
+                        if (!inputId) return;
+                        const inputQty = toNum(inp.qty);
+                        const outIds = outReq.map(o => o.outId);
+                        if (!outIds.length) return;
+
+                        let running = 0;
+                        outIds.forEach((outId, idx) => {
+                            const isLast = (idx === outIds.length - 1);
+                            let alloc = isLast ? (inputQty - running) : round6(inputQty * (shares[outId] || 0));
+                            alloc = round6(alloc);
+                            running = round6(running + alloc);
+                            allocations[outId][inputId] = alloc;
+                        });
+                    });
+
+                    // Attach conversions + computed fields onto summary arrays (non-breaking additive fields)
+                    const outputsEnriched = outputs.map((o) => {
+                        const id = o && o.id ? String(o.id) : '';
+                        const qty = toNum(o && o.qty);
+                        const conv = convMap[id] || 0;
+                        const req = (conv > 0) ? (qty * conv) : qty;
+                        return Object.assign({}, o, {
+                            id,
+                            qty: (o && o.qty != null ? o.qty : ''),
+                            conversion: conv,
+                            requirement: round6(req),
+                            share: round6(shares[id] || 0)
+                        });
+                    });
+
+                    const inputsEnriched = inputs.map((i) => {
+                        const id = i && i.id ? String(i.id) : '';
+                        const qty = toNum(i && i.qty);
+                        const conv = convMap[id] || 0;
+                        return Object.assign({}, i, {
+                            id,
+                            qty: (i && i.qty != null ? i.qty : ''),
+                            conversion: conv,
+                            qty_num: round6(qty),
+                            lotCount: Array.isArray(lotsMap[id]) ? lotsMap[id].length : 0
+                        });
+                    });
+
+                    const enriched = Object.assign({}, summary, {
+                        meta: Object.assign({}, (summary.meta || {}), {
+                            speciesId: String(species || ''),
+                            locationId: String(location || ''),
+                            subsidiaryId: String(subsidiary || ''),
+                            enrichedAt: (new Date()).toISOString()
+                        }),
+                        outputs: outputsEnriched,
+                        inputs: inputsEnriched,
+                        distribution: {
+                            method: 'prorated',
+                            totalRequirement: round6(totalReq),
+                            shares: shares,
+                            allocations: allocations
+                        }
+                    });
+
+                    finalSummaryStr = JSON.stringify(enriched);
+                }
+            } catch (_enrichErr) {
+                // If anything goes wrong, keep the original summary string (do not block save)
+                finalSummaryStr = summaryStr;
+            }
+
+            // Persist into real record fields
+            if (finalSummaryStr !== null && finalSummaryStr !== undefined) {
+                try { rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: finalSummaryStr }); } catch (_e) {}
+            }
+            if (lotsStr !== null && lotsStr !== undefined) {
+                try { rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: lotsStr }); } catch (_e) {}
+            }
+
+            // Helpful debug marker (log final output)
+            try {
+                log.debug({
+                    title: 'COS Repack: beforeSubmit persisted/enriched payloads',
+                    details: JSON.stringify({
+                        summaryLen: String(finalSummaryStr || '').length,
+                        lotsLen: String(lotsStr || '').length,
+                        enriched: String(finalSummaryStr || '').indexOf('"distribution"') >= 0
+                    })
+                });
+            } catch (_e) {}
+        } catch (e) {
+            try { log.error({ title: 'COS Repack: beforeSubmit failed', details: e }); } catch (_e) {}
+        }
+    };
+
     const afterSubmit = (scriptContext) => {
         try {
             globalScriptContext = scriptContext;
@@ -1434,6 +1774,6 @@ function showStep2(){
         return results;
     }
 
-    return { beforeLoad, afterSubmit };
+    return { beforeLoad, beforeSubmit, afterSubmit };
 
 });
