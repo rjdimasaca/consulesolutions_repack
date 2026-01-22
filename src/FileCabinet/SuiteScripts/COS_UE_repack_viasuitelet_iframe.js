@@ -342,6 +342,20 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         });
         inputLotsPayload.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
 
+        // EDIT mode: prefill hidden custpage payloads from persisted record fields
+        if (type === scriptContext.UserEventType.EDIT) {
+            try {
+                const savedSummary = scriptContext.newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '';
+                if (savedSummary) summaryPayload.defaultValue = String(savedSummary);
+            } catch (e) {}
+
+            try {
+                const savedLots = scriptContext.newRecord.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '';
+                if (savedLots) inputLotsPayload.defaultValue = String(savedLots);
+            } catch (e) {}
+        }
+
+
         // Suitelet base URL for lot selection (iframe modal)
         // NOTE: Update scriptId/deploymentId to match your existing Suitelet deployment.
         const suiteletBaseUrl = url.resolveScript({
@@ -356,7 +370,10 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
             container: 'custpage_cos_input_output'
         });
 
+        const modeStr = (type === scriptContext.UserEventType.EDIT ? 'EDIT' : 'CREATE');
+
         htmlField.defaultValue = `
+<script>window.COS_REPACK_MODE='${modeStr}';</script>
 <div style="padding:10px;border:1px solid #ccc;border-radius:6px;margin-bottom:12px;">
   <strong>Repack Builder</strong><br/>
   <small style="color:#666;">Step-by-step: select Outputs → select Inputs → review Summary.</small>
@@ -516,7 +533,17 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   function syncInputLotsHidden(){
     try{
       var h = byId('custpage_cos_input_lots_payload');
-      if (h) h.value = JSON.stringify(inputLotsByItemId);
+      if (!h) return;
+      // In EDIT mode, don't wipe server-prefilled lots before hydration.
+      try{
+        var mode = String(window.COS_REPACK_MODE || '').toUpperCase();
+        if (mode === 'EDIT' && !window.__COS_REPACK_HYDRATED_FROM_RECORD__) {
+          var hasPrefill = !!(h.value && String(h.value).trim());
+          var isEmptyObj = (!inputLotsByItemId || (typeof inputLotsByItemId === 'object' && !Object.keys(inputLotsByItemId).length));
+          if (hasPrefill && isEmptyObj) return;
+        }
+      }catch(e){}
+      h.value = JSON.stringify(inputLotsByItemId);
     }catch(e){}
   }
   function loadInputLotsHidden(){
@@ -561,7 +588,99 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   }
 
 
+  
   loadInputLotsHidden();
+
+  // Attempt to hydrate selections from saved payload (EDIT mode)
+  function hydrateFromRecordIfPossible(){
+    // Only hydrate in EDIT mode (VIEW has its own renderer)
+    try {
+      if (String(window.COS_REPACK_MODE || '').toUpperCase() === 'VIEW') return;
+    } catch(e){}
+
+    var h = byId('custpage_cos_summary_payload');
+    if (!h || !h.value) return;
+
+    var parsed = null;
+    try {
+      parsed = JSON.parse(h.value);
+      // sometimes the hidden value is a JSON string that contains JSON
+      if (typeof parsed === 'string' && parsed) parsed = JSON.parse(parsed);
+    } catch(e) {
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object') return;
+
+    // Resolve arrays from multiple possible shapes
+    var outsArr = parsed.outputs || (parsed.data && parsed.data.outputs) || parsed.outs || [];
+    var insArr  = parsed.inputs  || (parsed.data && parsed.data.inputs)  || parsed.ins  || [];
+
+    if (!Array.isArray(outsArr)) outsArr = [];
+    if (!Array.isArray(insArr))  insArr = [];
+
+    // Build selection maps
+    var outMap = {};
+    outsArr.forEach(function(o){
+      if (!o) return;
+      var id = String(o.id || o.itemId || o.internalid || o.internalId || '');
+      if (!id) return;
+      var name = String(o.name || o.itemName || o.text || '');
+      var qty  = (o.qty != null ? String(o.qty) : (o.quantity != null ? String(o.quantity) : ''));
+      // conversion may come from saved payload, else try from items list
+      var conv = (o.conversion != null ? String(o.conversion) : '');
+      if (!conv) {
+        var it = allItems.find(function(x){ return String(x.id) === id; });
+        if (it && it.conversion != null) conv = String(it.conversion);
+      }
+      outMap[id] = { id: id, name: name, qty: qty, conversion: conv };
+    });
+
+    var inMap = {};
+    insArr.forEach(function(i){
+      if (!i) return;
+      var id = String(i.id || i.itemId || i.internalid || i.internalId || '');
+      if (!id) return;
+      var name = String(i.name || i.itemName || i.text || '');
+      var qty  = (i.qty != null ? String(i.qty) : (i.quantity != null ? String(i.quantity) : ''));
+      var conv = (i.conversion != null ? String(i.conversion) : '');
+      if (!conv) {
+        var it = allItems.find(function(x){ return String(x.id) === id; });
+        if (it && it.conversion != null) conv = String(it.conversion);
+      }
+      inMap[id] = { id: id, name: name, qty: qty, conversion: conv };
+    });
+
+    // If there's nothing to hydrate, skip
+    if (!Object.keys(outMap).length && !Object.keys(inMap).length) return;
+
+    outputsSelected = outMap;
+    inputsSelected  = inMap;
+
+    // Re-render Step 1 immediately with restored outputs
+    try { renderOutputs(); } catch(e) {}
+
+    // Mark step2 prepared if we have inputs
+    inputsPrepared = Object.keys(inputsSelected).length > 0;
+
+    // Show step2 + summary (as if user walked through steps)
+    if (inputsPrepared) {
+      showStep2();
+      renderInputs();
+    }
+    // Only build summary if both sides exist
+    if (Object.keys(outputsSelected).length && Object.keys(inputsSelected).length) {
+      renderSummary();
+    }
+
+    // Ensure buttons/counts/hidden fields reflect hydrated state
+    syncHidden();
+    updateCounts();
+    updateStepButtons();
+
+    window.__COS_REPACK_HYDRATED_FROM_RECORD__ = true;
+  }
+
+
 
 
   // Modal helpers (lots selection)
@@ -718,24 +837,35 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   }
 
   function syncHidden(){
+    // In EDIT mode, the page may load with server-prefilled hidden payloads.
+    // Avoid wiping those values before hydrateFromRecordIfPossible() runs.
     syncInputLotsHidden();
     var outF = byId('custpage_cos_outputs_payload');
     var inF  = byId('custpage_cos_inputs_payload');
     var sumF = byId('custpage_cos_summary_payload');
 
+    var mode = '';
+    try{ mode = String(window.COS_REPACK_MODE || '').toUpperCase(); }catch(e){}
+    var preHydrate = (mode === 'EDIT' && !window.__COS_REPACK_HYDRATED_FROM_RECORD__);
+
+    var outs = Object.keys(outputsSelected).map(function(k){ return outputsSelected[k]; });
+    var ins  = Object.keys(inputsSelected).map(function(k){ return inputsSelected[k]; });
+
     if (outF) {
-      var outs = Object.keys(outputsSelected).map(function(k){ return outputsSelected[k]; });
-      outF.value = JSON.stringify({ outputs: outs, meta: lastMeta || {} });
+      if (!(preHydrate && outF.value && String(outF.value).trim() && !outs.length)) {
+        outF.value = JSON.stringify({ outputs: outs, meta: lastMeta || {} });
+      }
     }
     if (inF) {
-      var ins = Object.keys(inputsSelected).map(function(k){ return inputsSelected[k]; });
-      inF.value = JSON.stringify({ inputs: ins, meta: lastMeta || {} });
+      if (!(preHydrate && inF.value && String(inF.value).trim() && !ins.length)) {
+        inF.value = JSON.stringify({ inputs: ins, meta: lastMeta || {} });
+      }
     }
     if (sumF) {
-      // Keep summary field always updated as a combined snapshot
-      var outs2 = Object.keys(outputsSelected).map(function(k){ return outputsSelected[k]; });
-      var ins2  = Object.keys(inputsSelected).map(function(k){ return inputsSelected[k]; });
-      sumF.value = JSON.stringify({ outputs: outs2, inputs: ins2, meta: lastMeta || {} });
+      // Keep summary field always updated as a combined snapshot, but don't wipe prefill before hydrate.
+      if (!(preHydrate && sumF.value && String(sumF.value).trim() && !outs.length && !ins.length)) {
+        sumF.value = JSON.stringify({ outputs: outs, inputs: ins, meta: lastMeta || {} });
+      }
     }
   }
 
@@ -1285,11 +1415,38 @@ function showStep2(){
     lastMeta = meta || {};
     allItems = normalizeItems(items);
 
+    // Preserve any server-prefilled payload values before resetAll() wipes them via syncHidden()
+    var __prefillSummaryVal = '';
+    var __prefillLotsVal = '';
+    try {
+      var __h1 = byId('custpage_cos_summary_payload');
+      if (__h1) __prefillSummaryVal = __h1.value || '';
+      var __l1 = byId('custpage_cos_input_lots_payload');
+      if (__l1) __prefillLotsVal = __l1.value || '';
+    } catch(e) {}
+
     // Reset the step flow whenever species/items change
     resetAll();
 
+    // Restore payload values so EDIT hydration can read them
+    try {
+      var __h2 = byId('custpage_cos_summary_payload');
+      if (__h2 && __prefillSummaryVal) __h2.value = __prefillSummaryVal;
+      var __l2 = byId('custpage_cos_input_lots_payload');
+      if (__l2 && __prefillLotsVal) __l2.value = __prefillLotsVal;
+    } catch(e) {}
+
     wireUiOnce();
     renderOutputs();
+
+    // EDIT-mode hydration:
+    // If the record already has a saved summary payload, rebuild Step 1/2/3 selections
+    // after items load (so renderers can resolve item names/conversions).
+    try {
+      if (!window.__COS_REPACK_HYDRATED_FROM_RECORD__) {
+        hydrateFromRecordIfPossible();
+      }
+    } catch(e) {}
   };
 
   // initial wire
