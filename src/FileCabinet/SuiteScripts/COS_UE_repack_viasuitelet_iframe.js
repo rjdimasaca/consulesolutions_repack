@@ -327,6 +327,13 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         });
         inputsPayload.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
 
+        const poPayload = form.addField({
+            id: 'custpage_cos_po_payload',
+            type: serverWidget.FieldType.LONGTEXT,
+            label: 'PO Payload'
+        });
+        poPayload.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+
         const summaryPayload = form.addField({
             id: 'custpage_cos_summary_payload',
             type: serverWidget.FieldType.LONGTEXT,
@@ -447,21 +454,32 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       <div id="cos_in_rows"></div>
     </div>
 
-    <!-- PURCHASE ORDERS (placeholder only) -->
+    <!-- PURCHASE ORDERS -->
     <div id="cos_po_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
       <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
-        <div style="font-weight:bold;">Purchase Orders</div>
-        <div style="font-size:12px;opacity:0.9;">(Coming next) Define POs for this repack</div>
+        <div style="font-weight:bold;">Purchase Order</div>
+        <div style="font-size:12px;opacity:0.9;">If inventory inputs are insufficient, order the remaining requirement</div>
       </div>
 
-      <div style="padding:12px;background:#fff;">
-        <div style="font-size:12px;color:#666;line-height:1.4;">
-          This section will allow users to define purchase orders associated to the repack.
-          <br/><br/>
-          For now this is a placeholder.
-        </div>
+      <div style="padding:10px 12px;background:#f7f7f7;border-bottom:1px solid #ddd;display:flex;gap:8px;align-items:center;">
+        <input id="cos_po_search" type="text" placeholder="Search purchase items" style="flex:1;padding:6px;" />
+        <span id="cos_po_count" style="font-size:12px;color:#333;"></span>
+        <span id="cos_po_hint" style="font-size:12px;color:#666;margin-left:auto;"></span>
       </div>
+
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 1fr 1fr;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+        <div></div>
+        <div>Item</div>
+        <div style="text-align:right;">Order Qty</div>
+        <div style="text-align:right;">Order Weight</div>
+        <div style="text-align:right;">Conversion</div>
+        <div style="text-align:right;">Suggested Qty</div>
+        <div style="text-align:right;">Suggested Weight</div>
+      </div>
+
+      <div id="cos_po_rows"></div>
     </div>
+
 
   </div>
 
@@ -500,6 +518,11 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
   .cos_tbl_row_input:nth-child(even){background:#fafafa;}
   .cos_tbl_row_input button{padding:6px 10px;cursor:pointer;}
+
+  .cos_tbl_row_po{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 1fr 1fr;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row_po:nth-child(even){background:#fafafa;}
+  .cos_tbl_row_po input[type="text"]{padding:6px;width:140px;text-align:right;}
+  .cos_tbl_row_po input[type="checkbox"]{width:16px;height:16px;}
 
   .cos_tbl_row:nth-child(even){background:#fafafa;}
   .cos_tbl_row input[type="text"]{padding:6px;width:140px;text-align:right;}
@@ -563,7 +586,11 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   var allItems = [];
   var lastMeta = {};
   var outputsSelected = {}; // id -> {id, name, qty}
-  var inputsSelected = {};  // id -> {id, name, qty}
+  var inputsSelected = {};
+  var poSelected = {};      // id -> {id, name, qty}
+  var poSuggested = {};     // id -> {id, name, qty} (auto suggestion)
+  var poOverrides = {};     // id -> true if user manually edited PO qty/weight
+  // id -> {id, name, qty}
   var inputsPrepared = false;
 
   function byId(id){ return document.getElementById(id); }
@@ -829,9 +856,109 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
           remaining -= add * t.conv;
         }
       }
+      // After suggesting inventory inputs, compute shortage and suggest Purchase Order lines
+      updatePurchaseSuggestions();
       syncHidden();
       updateCounts();
     }catch(e){}
+
+  function computeRequiredWeight(){
+    var outKeys = Object.keys(outputsSelected);
+    var required = 0;
+    outKeys.forEach(function(k){
+      var o = outputsSelected[k];
+      if (!o) return;
+      var it = allItems.find(function(x){ return String(x.id) === String(o.id); });
+      var conv = it ? toNum(it.conversion) : 0;
+      var qty = toNum(o.qty);
+      required += qty * conv;
+    });
+    return required;
+  }
+
+  function computeIssuedWeight(){
+    var inKeys = Object.keys(inputsSelected);
+    var issued = 0;
+    inKeys.forEach(function(k){
+      var i = inputsSelected[k];
+      if (!i) return;
+      var it = allItems.find(function(x){ return String(x.id) === String(i.id); });
+      var conv = it ? toNum(it.conversion) : 0;
+      var qty = toNum(i.qty);
+      issued += qty * conv;
+    });
+    return issued;
+  }
+
+  function updatePurchaseSuggestions(){
+    try{
+      var required = computeRequiredWeight();
+      if (!(required > 0)) { poSuggested = {}; return; }
+
+      var issued = computeIssuedWeight();
+      var remaining = required - issued;
+      if (!(remaining > 0)) {
+        // No shortage: clear suggested lines. Keep overridden lines if any.
+        poSuggested = {};
+        // remove non-overridden selections
+        Object.keys(poSelected).forEach(function(id){
+          if (!poOverrides[String(id)]) delete poSelected[id];
+        });
+        syncHidden();
+        return;
+      }
+
+      var exclude = {};
+      Object.keys(outputsSelected).forEach(function(k){ exclude[String(k)] = true; });
+
+      // candidates: any item (excluding outputs) with conversion
+      var candidates = allItems.filter(function(it){
+        if (!it || !it.id) return false;
+        if (exclude[String(it.id)]) return false;
+        return toNum(it.conversion) > 0;
+      }).map(function(it){
+        return { id:String(it.id), name:String(it.name||it.id), conv:toNum(it.conversion) };
+      }).sort(function(a,b){ return (b.conv - a.conv) || a.name.localeCompare(b.name); });
+
+      if (!candidates.length) { poSuggested = {}; return; }
+
+      // Greedy: use best conversion to minimize qty
+      poSuggested = {};
+      var rem = remaining;
+      for (var i=0;i<candidates.length && rem > 0;i++){
+        var c = candidates[i];
+        var needQty = Math.ceil(rem / c.conv);
+        if (needQty <= 0) continue;
+        poSuggested[c.id] = { id:c.id, name:c.name, qty: roundNice(needQty) };
+        rem -= needQty * c.conv;
+        // single line is usually enough; break to keep UI simple
+        break;
+      }
+
+      // Apply suggested qty into poSelected unless overridden
+      // Also ensure all overridden lines remain.
+      Object.keys(poSuggested).forEach(function(id){
+        if (!poOverrides[String(id)]) {
+          poSelected[id] = { id:id, name:poSuggested[id].name, qty: poSuggested[id].qty };
+        } else if (!poSelected[id]) {
+          poSelected[id] = { id:id, name:poSuggested[id].name, qty: poSuggested[id].qty };
+        }
+      });
+
+      // Remove non-suggested, non-overridden lines
+      Object.keys(poSelected).forEach(function(id){
+        if (poOverrides[String(id)]) return;
+        if (!poSuggested[String(id)]) delete poSelected[id];
+      });
+
+      // After suggesting inventory inputs, compute shortage and suggest Purchase Order lines
+      updatePurchaseSuggestions();
+      syncHidden();
+      updateCounts();
+      updateStepButtons();
+    }catch(e){}
+  }
+
   }
 
   function countSelected(map){
@@ -845,6 +972,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     var outF = byId('custpage_cos_outputs_payload');
     var inF  = byId('custpage_cos_inputs_payload');
     var sumF = byId('custpage_cos_summary_payload');
+    var poF  = byId('custpage_cos_po_payload');
 
     var mode = '';
     try{ mode = String(window.COS_REPACK_MODE || '').toUpperCase(); }catch(e){}
@@ -852,6 +980,9 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
     var outs = Object.keys(outputsSelected).map(function(k){ return outputsSelected[k]; });
     var ins  = Object.keys(inputsSelected).map(function(k){ return inputsSelected[k]; });
+    var pos  = Object.keys(poSelected).map(function(k){ return poSelected[k]; });
+    var pos  = Object.keys(poSelected).map(function(k){ return poSelected[k]; });
+    var posSug = Object.keys(poSuggested).map(function(k){ return poSuggested[k]; });
 
     if (outF) {
       if (!(preHydrate && outF.value && String(outF.value).trim() && !outs.length)) {
@@ -862,11 +993,18 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       if (!(preHydrate && inF.value && String(inF.value).trim() && !ins.length)) {
         inF.value = JSON.stringify({ inputs: ins, meta: lastMeta || {} });
       }
+    if (poF) {
+      // PO payload is stored separately, including suggested lines for transparency
+      if (!(preHydrate && poF.value && String(poF.value).trim() && !pos.length)) {
+        poF.value = JSON.stringify({ purchase: pos, suggested: posSug, meta: lastMeta || {} });
+      }
+    }
+
     }
     if (sumF) {
       // Keep summary field always updated as a combined snapshot, but don't wipe prefill before hydrate.
       if (!(preHydrate && sumF.value && String(sumF.value).trim() && !outs.length && !ins.length)) {
-        sumF.value = JSON.stringify({ outputs: outs, inputs: ins, meta: lastMeta || {} });
+        sumF.value = JSON.stringify({ outputs: outs, inputs: ins, purchase: pos, purchaseSuggested: posSug, meta: lastMeta || {} });
       }
     }
   }
@@ -879,20 +1017,22 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
     var outCount = countSelected(outputsSelected);
     var inCount  = countSelected(inputsSelected);
+    var poCount  = countSelected(poSelected);
 
     if (btnPrep) btnPrep.disabled = (outCount === 0);
     if (prepHint) prepHint.textContent = (outCount === 0) ? 'Select at least one output to continue.' : 'Ready to select inputs.';
 
-    if (btnSum) btnSum.disabled = (!inputsPrepared || inCount === 0);
+    if (btnSum) btnSum.disabled = (!inputsPrepared || (inCount + poCount) === 0);
     if (sumHint) {
       if (!inputsPrepared) sumHint.textContent = 'Prepare inputs first.';
-      else sumHint.textContent = (inCount === 0) ? 'Select at least one input to build summary.' : 'Ready to build summary.';
+      else sumHint.textContent = ((inCount + poCount) === 0) ? 'Select at least one input or PO line to build summary.' : 'Ready to build summary.';
     }
   }
 
   function renderTable(rowsEl, items, selectionMap, searchQuery, excludeIds){
     if (!rowsEl) return;
     var isInputTable = (rowsEl.id === 'cos_in_rows');
+    var isPOTable = (rowsEl.id === 'cos_po_rows');
     var exclude = excludeIds || {};
 
     var filtered = applySearch(items, searchQuery);
@@ -921,7 +1061,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
     filtered.forEach(function(it){
       var row = document.createElement('div');
-      row.className = isInputTable ? 'cos_tbl_row_input' : 'cos_tbl_row';
+      row.className = isInputTable ? 'cos_tbl_row_input' : (isPOTable ? 'cos_tbl_row_po' : 'cos_tbl_row');
 
       // checkbox
       var c1 = document.createElement('div');
@@ -966,6 +1106,25 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       var cConv = document.createElement('div');
       cConv.style.textAlign = 'right';
       cConv.textContent = (it.conversion != null ? it.conversion : '');
+
+      // suggested (PO only)
+      var cSugQty = null;
+      var cSugWt = null;
+      if (isPOTable) {
+        cSugQty = document.createElement('div');
+        cSugQty.style.textAlign = 'right';
+        var sugLine = poSuggested[String(it.id)];
+        cSugQty.textContent = (sugLine && sugLine.qty != null) ? String(sugLine.qty) : '';
+
+        cSugWt = document.createElement('div');
+        cSugWt.style.textAlign = 'right';
+        var convS = toNum(it.conversion);
+        if (sugLine && sugLine.qty != null && convS > 0) {
+          cSugWt.textContent = round3(toNum(sugLine.qty) * convS);
+        } else {
+          cSugWt.textContent = '';
+        }
+      }
 
       var cAvail = document.createElement('div');
       cAvail.style.textAlign = 'right';
@@ -1045,6 +1204,12 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         updateCounts();
         updateStepButtons();
 
+        // Keep purchase suggestions in sync with shortages
+        if (inputsPrepared) {
+          try{ updatePurchaseSuggestions(); }catch(e){}
+          try{ renderPO(); }catch(e){}
+        }
+
         // If outputs changed and inputs already prepared, refresh inputs list (exclude outputs)
         if (rowsEl.id === 'cos_out_rows' && inputsPrepared) {
           renderInputs();
@@ -1055,15 +1220,28 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         if (isProg) return;
         if (!selectionMap[it.id]) return;
         selectionMap[it.id].qty = qty.value;
+        if (isPOTable) { poOverrides[String(it.id)] = true; }
         // LAST EDITED WINS: qty is source of truth
         setWeightFromQty();
+
+        // Keep PO suggestions in sync when user changes inputs/outputs
+        if (isInputTable && inputsPrepared) {
+          updatePurchaseSuggestions();
+          renderPO();
+        }
       });
 
       wt.addEventListener('blur', function(){
         if (isProg) return;
         if (!selectionMap[it.id]) return;
+        if (isPOTable) { poOverrides[String(it.id)] = true; }
         // LAST EDITED WINS: weight is source of truth
         setQtyFromWeight();
+
+        if (isInputTable && inputsPrepared) {
+          updatePurchaseSuggestions();
+          renderPO();
+        }
       });
 
       if (isInputTable) {
@@ -1098,6 +1276,14 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         row.appendChild(cOnOrder);
         row.appendChild(cBackordered);
         row.appendChild(cLots);
+      } else if (isPOTable) {
+        row.appendChild(c1);
+        row.appendChild(c2);
+        row.appendChild(cQty);
+        row.appendChild(cWt);
+        row.appendChild(cConv);
+        row.appendChild(cSugQty);
+        row.appendChild(cSugWt);
       } else {
         row.appendChild(c1);
         row.appendChild(c2);
@@ -1117,9 +1303,11 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   function updateCounts(){
     var outCountEl = byId('cos_out_count');
     var inCountEl  = byId('cos_in_count');
+    var poCountEl  = byId('cos_po_count');
 
     if (outCountEl) outCountEl.textContent = countSelected(outputsSelected) + ' selected';
     if (inCountEl)  inCountEl.textContent  = countSelected(inputsSelected) + ' selected';
+    if (poCountEl)  poCountEl.textContent  = countSelected(poSelected) + ' selected';
   }
 
   function renderOutputs(){
@@ -1144,9 +1332,35 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   }
 
   
-  function resetStep2And3(){
+  
+  function renderPO(){
+    var poRows = byId('cos_po_rows');
+    var poQ = byId('cos_po_search') ? byId('cos_po_search').value : '';
+
+    // Exclude selected outputs from PO list for clarity
+    var exclude = {};
+    Object.keys(outputsSelected).forEach(function(k){ exclude[k] = true; });
+
+    renderTable(poRows, allItems, poSelected, poQ, exclude);
+    updateCounts();
+    updateStepButtons();
+
+    // PO hint about suggested vs overridden
+    try{
+      var hint = byId('cos_po_hint');
+      if (hint){
+        var overridden = Object.keys(poOverrides||{}).length;
+        hint.textContent = overridden ? ('Overrides: ' + overridden) : 'Suggested lines update automatically unless overridden.';
+      }
+    }catch(e){}
+  }
+
+function resetStep2And3(){
     // Clear inputs and any UI built from them
     inputsSelected = {};
+    poSelected = {};
+    poSuggested = {};
+    poOverrides = {};
     inputsPrepared = false;
 
     // Clear step2 input search box and rows
@@ -1158,6 +1372,17 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     try {
       var inRows = byId('cos_in_rows');
       if (inRows) inRows.innerHTML = '';
+    } catch(e) {}
+
+    try {
+      var poSearch = byId('cos_po_search');
+      if (poSearch) poSearch.value = '';
+    } catch(e) {}
+
+    try {
+      var poRows = byId('cos_po_rows');
+      if (poRows) poRows.innerHTML = '';
+
     } catch(e) {}
 
     // Hide step2 container until shown again
@@ -1196,6 +1421,7 @@ function showStep2(){
     suggestInputs();
 
     renderInputs();
+    renderPO();
 
     var sumSection = byId('cos_summary_section');
     if (sumSection) sumSection.style.display = 'none';
@@ -1210,9 +1436,10 @@ function showStep2(){
 
     var outs = Object.keys(outputsSelected).map(function(k){ return outputsSelected[k]; });
     var ins  = Object.keys(inputsSelected).map(function(k){ return inputsSelected[k]; });
+    var pos  = Object.keys(poSelected).map(function(k){ return poSelected[k]; });
 
-    if (!outs.length || !ins.length) {
-      body.innerHTML = '<div class="cos_empty">Select at least one output and one input to build the summary.</div>';
+    if (!outs.length || (!ins.length && !pos.length)) {
+      body.innerHTML = '<div class="cos_empty">Select at least one output and at least one input or purchase line to build the summary.</div>';
       summarySection.style.display = 'block';
       syncHidden();
       return;
@@ -1370,7 +1597,30 @@ function showStep2(){
     html2 += '<div class="cos_sum_grid">';
     html2 += buildBox('Outputs', outs);
     html2 += buildBox('Inputs', ins);
+    if (pos.length) html2 += buildBox('Purchase Order', pos);
     html2 += '</div>';
+
+    // Totals (weight)
+    try {
+      var reqW = computeRequiredWeight();
+      var issueW = computeIssuedWeight();
+      var poW = 0;
+      pos.forEach(function(p){
+        var itp = allItems.find(function(x){ return String(x.id) === String(p.id); });
+        var convp = itp ? toNum(itp.conversion) : 0;
+        poW += toNum(p.qty) * convp;
+      });
+      var coveredW = issueW + poW;
+      var diff = coveredW - reqW;
+      var diffLabel = (Math.abs(diff) < 0.0005) ? 'Balanced' : (diff < 0 ? 'Short' : 'Over');
+      html2 += '<div style="margin:10px 0 12px 0;padding:10px 12px;border:1px solid #eee;border-radius:6px;background:#fafafa;font-size:12px;display:flex;gap:14px;flex-wrap:wrap;">';
+      html2 += '<div><b>Required Weight</b>: ' + (reqW.toFixed(3).replace(/\.?0+$/,'')) + '</div>';
+      html2 += '<div><b>Issue Weight</b>: ' + (issueW.toFixed(3).replace(/\.?0+$/,'')) + '</div>';
+      html2 += '<div><b>PO Weight</b>: ' + (poW.toFixed(3).replace(/\.?0+$/,'')) + '</div>';
+      html2 += '<div><b>Covered Weight</b>: ' + (coveredW.toFixed(3).replace(/\.?0+$/,'')) + '</div>';
+      html2 += '<div><b>Status</b>: ' + diffLabel + (diffLabel==='Balanced' ? '' : (' (' + diff.toFixed(3).replace(/\.?0+$/,'') + ')')) + '</div>';
+      html2 += '</div>';
+    } catch(e) {}
 
     // Distribution section
     html2 += '<div class="cos_dist_wrap">';
@@ -1396,6 +1646,7 @@ function showStep2(){
   function wireUiOnce(){
     var outSearch = byId('cos_out_search');
     var inSearch  = byId('cos_in_search');
+    var poSearch  = byId('cos_po_search');
     var btnPrep   = byId('cos_btn_prepare_inputs');
     var btnSum    = byId('cos_btn_build_summary');
 
@@ -1407,6 +1658,11 @@ function showStep2(){
     if (inSearch && !inSearch._cosBound) {
       inSearch._cosBound = true;
       inSearch.addEventListener('input', function(){ if (inputsPrepared) renderInputs(); });
+    }
+
+    if (poSearch && !poSearch._cosBound) {
+      poSearch._cosBound = true;
+      poSearch.addEventListener('input', function(){ if (inputsPrepared) renderPO(); });
     }
 
     if (btnPrep && !btnPrep._cosBound) {
@@ -1442,6 +1698,9 @@ function showStep2(){
   function resetAll(){
     outputsSelected = {};
     inputsSelected = {};
+    poSelected = {};
+    poSuggested = {};
+    poOverrides = {};
     inputsPrepared = false;
 
     // Hide step2 + summary
