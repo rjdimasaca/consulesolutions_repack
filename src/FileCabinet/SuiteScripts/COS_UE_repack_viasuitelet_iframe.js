@@ -381,7 +381,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
 <!-- STEP 1: OUTPUTS -->
 <div id="cos_out_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
-  <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
+  <div style="background: #b42b20;color:#fff;padding:10px 12px;">
     <div style="font-weight:bold;">Step 1: Select Outputs</div>
     <div style="font-size:12px;opacity:0.9;">Choose output items and quantities</div>
   </div>
@@ -391,10 +391,11 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     <span id="cos_out_count" style="font-size:12px;color:#333;"></span>
   </div>
 
-  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
     <div></div>
     <div>Item</div>
     <div style="text-align:right;">Qty</div>
+    <div style="text-align:right;">Weight</div>
     <div style="text-align:right;">Conversion</div>
     <div style="text-align:right;">Available</div>
     <div style="text-align:right;">On Hand</div>
@@ -419,7 +420,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
     <!-- INPUTS -->
     <div id="cos_in_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
-      <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
+      <div style="background:#ffc400;color:#fff;padding:10px 12px;">
         <div style="font-weight:bold;">Step 2: Select Inputs</div>
         <div style="font-size:12px;opacity:0.9;">Choose which items to consume as inputs</div>
       </div>
@@ -429,10 +430,11 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         <span id="cos_in_count" style="font-size:12px;color:#333;"></span>
       </div>
 
-      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 120px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
         <div></div>
         <div>Item</div>
         <div style="text-align:right;">Qty</div>
+        <div style="text-align:right;">Weight</div>
         <div style="text-align:right;">Conversion</div>
         <div style="text-align:right;">Available</div>
         <div style="text-align:right;">On Hand</div>
@@ -473,7 +475,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
 <!-- STEP 3: SUMMARY -->
 <div id="cos_summary_section" style="display:none;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-bottom:12px;">
-  <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
+  <div style="background:#01a801;color:#fff;padding:10px 12px;">
     <div style="font-weight:bold;">Repack Summary</div>
     <div style="font-size:12px;opacity:0.9;">Review outputs and inputs before proceeding</div>
   </div>
@@ -493,9 +495,9 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 </div>
 
 <style>
-  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
 
-  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 120px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
   .cos_tbl_row_input:nth-child(even){background:#fafafa;}
   .cos_tbl_row_input button{padding:6px 10px;cursor:pointer;}
 
@@ -906,6 +908,15 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       return;
     }
 
+    function round3(n){
+      if (n == null) return '';
+      var x = Number(n);
+      if (!isFinite(x)) return '';
+      var s = String(x);
+      if (s.indexOf('.') >= 0) s = x.toFixed(3).replace(/\.?0+$/,'');
+      return s;
+    }
+
     rowsEl.innerHTML = '';
 
     filtered.forEach(function(it){
@@ -924,6 +935,34 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       c2.textContent = it.name;
 
       // qty
+      var cQty = document.createElement('div');
+      cQty.style.textAlign = 'right';
+      var qty = document.createElement('input');
+      qty.type = 'text';
+      qty.placeholder = '0';
+      qty.value = selectionMap[it.id] ? String(selectionMap[it.id].qty || '') : '';
+      qty.disabled = !selectionMap[it.id];
+      cQty.appendChild(qty);
+
+      // weight (user-entry option; derived from qty and conversion)
+      var cWt = document.createElement('div');
+      cWt.style.textAlign = 'right';
+      var wt = document.createElement('input');
+      wt.type = 'text';
+      wt.placeholder = '0';
+      var convNum = toNum(it.conversion);
+      // initial weight if selected
+      if (selectionMap[it.id] && convNum > 0){
+        wt.value = round3(toNum(selectionMap[it.id].qty) * convNum);
+      } else {
+        wt.value = '';
+      }
+      // editable only when selected and conversion is valid
+      wt.disabled = (!selectionMap[it.id]) || !(convNum > 0);
+      if (!(convNum > 0)) wt.placeholder = '—';
+      cWt.appendChild(wt);
+
+      // conversion
       var cConv = document.createElement('div');
       cConv.style.textAlign = 'right';
       cConv.textContent = (it.conversion != null ? it.conversion : '');
@@ -948,15 +987,37 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       cBackordered.style.textAlign = 'right';
       cBackordered.textContent = (it.backordered != null ? it.backordered : '');
 
+      // last-edited-wins guards
+      var isProg = false;
 
-      var c3 = document.createElement('div');
-      c3.style.textAlign = 'right';
-      var qty = document.createElement('input');
-      qty.type = 'text';
-      qty.placeholder = '0';
-      qty.value = selectionMap[it.id] ? String(selectionMap[it.id].qty || '') : '';
-      qty.disabled = !selectionMap[it.id];
-      c3.appendChild(qty);
+      function setQtyFromWeight(){
+        if (!selectionMap[it.id]) return;
+        var conv = toNum(it.conversion);
+        if (!(conv > 0)) return;
+        var w = toNum(wt.value);
+        var q = w / conv;
+        isProg = true;
+        qty.value = roundNice(q);
+        selectionMap[it.id].qty = qty.value;
+        // keep weight normalized
+        wt.value = round3(toNum(qty.value) * conv);
+        isProg = false;
+        syncHidden();
+      }
+
+      function setWeightFromQty(){
+        if (!selectionMap[it.id]) return;
+        var conv = toNum(it.conversion);
+        if (!(conv > 0)) {
+          wt.value = '';
+          return;
+        }
+        var q = toNum(qty.value);
+        isProg = true;
+        wt.value = round3(q * conv);
+        isProg = false;
+        syncHidden();
+      }
 
       // events
       cb.addEventListener('change', function(){
@@ -964,10 +1025,21 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
           selectionMap[it.id] = { id: it.id, name: it.name, qty: qty.value ? qty.value : '1' };
           qty.disabled = false;
           if (!qty.value) qty.value = '1';
+
+          // enable weight only if conv valid
+          convNum = toNum(it.conversion);
+          wt.disabled = !(convNum > 0) ? true : false;
+          if (convNum > 0){
+            wt.value = round3(toNum(qty.value) * convNum);
+          } else {
+            wt.value = '';
+          }
         } else {
           delete selectionMap[it.id];
           qty.disabled = true;
           qty.value = '';
+          wt.disabled = true;
+          wt.value = '';
         }
         syncHidden();
         updateCounts();
@@ -979,15 +1051,24 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         }
       });
 
-      qty.addEventListener('input', function(){
+      qty.addEventListener('blur', function(){
+        if (isProg) return;
         if (!selectionMap[it.id]) return;
         selectionMap[it.id].qty = qty.value;
-        syncHidden();
+        // LAST EDITED WINS: qty is source of truth
+        setWeightFromQty();
+      });
+
+      wt.addEventListener('blur', function(){
+        if (isProg) return;
+        if (!selectionMap[it.id]) return;
+        // LAST EDITED WINS: weight is source of truth
+        setQtyFromWeight();
       });
 
       if (isInputTable) {
-        var c4 = document.createElement('div');
-        c4.style.textAlign = 'right';
+        var cLots = document.createElement('div');
+        cLots.style.textAlign = 'right';
         var btnLots = document.createElement('button');
         btnLots.type = 'button';
         btnLots.textContent = 'Select Lots';
@@ -1003,22 +1084,25 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
           e.stopPropagation();
           openLotsModal(it);
         });
-        c4.appendChild(btnLots);
-        c4.appendChild(span);
+        cLots.appendChild(btnLots);
+        cLots.appendChild(span);
+
         row.appendChild(c1);
         row.appendChild(c2);
-        row.appendChild(c3);
+        row.appendChild(cQty);
+        row.appendChild(cWt);
         row.appendChild(cConv);
         row.appendChild(cAvail);
         row.appendChild(cOnHand);
         row.appendChild(cCommitted);
         row.appendChild(cOnOrder);
         row.appendChild(cBackordered);
-        row.appendChild(c4);
+        row.appendChild(cLots);
       } else {
         row.appendChild(c1);
         row.appendChild(c2);
-        row.appendChild(c3);
+        row.appendChild(cQty);
+        row.appendChild(cWt);
         row.appendChild(cConv);
         row.appendChild(cAvail);
         row.appendChild(cOnHand);
