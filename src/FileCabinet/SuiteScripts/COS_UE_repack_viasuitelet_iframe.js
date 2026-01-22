@@ -1878,6 +1878,40 @@ function showStep2(){
 
         const convMap = fetchConversionMap(itemIds);
 
+        function prorateLotsForAllocation(lotsArr, allocQty, totalQty) {
+            try {
+                if (!Array.isArray(lotsArr) || !lotsArr.length) return [];
+                const tq = toNum(totalQty);
+                const aq = toNum(allocQty);
+                if (!(tq > 0) || !(aq > 0)) return [];
+                const ratio = aq / tq;
+
+                const out = [];
+                let running = 0;
+                for (let i = 0; i < lotsArr.length; i++) {
+                    const l = lotsArr[i] || {};
+                    const origQ = toNum(l.qty);
+                    if (!(origQ > 0)) continue;
+
+                    let q = (i === lotsArr.length - 1) ? (aq - running) : round6(origQ * ratio);
+                    q = round6(q);
+                    running = round6(running + q);
+                    if (q <= 0) continue;
+
+                    out.push(Object.assign({}, l, { qty: q }));
+                }
+
+                if (!out.length && lotsArr.length) {
+                    const l0 = lotsArr[0] || {};
+                    out.push(Object.assign({}, l0, { qty: aq }));
+                }
+                return out;
+            } catch (e) {
+                return [];
+            }
+        }
+
+
         // Output requirements (Qty × Conversion). If conversion missing, fallback to qty-only share.
         const outReq = outputs.map((o) => {
             const outId = o && o.id ? String(o.id) : '';
@@ -1915,7 +1949,7 @@ function showStep2(){
                 allocationsByOut[outId].push({
                     input_item_internalid: Number(inputId),
                     input_item_quantity: alloc,
-                    input_item_lots: Array.isArray(lotsMap[inputId]) ? lotsMap[inputId] : []
+                    input_item_lots: prorateLotsForAllocation((Array.isArray(lotsMap[inputId]) ? lotsMap[inputId] : []), alloc, inputQty)
                 });
             });
         });
@@ -2121,6 +2155,40 @@ function showStep2(){
                     inputs.forEach(i => { if (i && i.id) itemIds.push(String(i.id)); });
 
                     const convMap = fetchConversionMap(itemIds);
+
+                    function prorateLotsForAllocation(lotsArr, allocQty, totalQty) {
+                        try {
+                            if (!Array.isArray(lotsArr) || !lotsArr.length) return [];
+                            const tq = toNum(totalQty);
+                            const aq = toNum(allocQty);
+                            if (!(tq > 0) || !(aq > 0)) return [];
+                            const ratio = aq / tq;
+
+                            const out = [];
+                            let running = 0;
+                            for (let i = 0; i < lotsArr.length; i++) {
+                                const l = lotsArr[i] || {};
+                                const origQ = toNum(l.qty);
+                                if (!(origQ > 0)) continue;
+
+                                let q = (i === lotsArr.length - 1) ? (aq - running) : round6(origQ * ratio);
+                                q = round6(q);
+                                running = round6(running + q);
+                                if (q <= 0) continue;
+
+                                out.push(Object.assign({}, l, { qty: q }));
+                            }
+
+                            if (!out.length && lotsArr.length) {
+                                const l0 = lotsArr[0] || {};
+                                out.push(Object.assign({}, l0, { qty: aq }));
+                            }
+                            return out;
+                        } catch (e) {
+                            return [];
+                        }
+                    }
+
 
                     // Compute output requirements + shares (same logic used for WO allocation)
                     const outReq = outputs.map((o) => {
@@ -2329,35 +2397,261 @@ function showStep2(){
 
 
                 // Components (wipe defaults, then repopulate from payload)
+                /*
+                // Components (wipe defaults, then repopulate from payload)
                 try {
                     const existingLineCount = woRec.getLineCount({ sublistId: 'item' }) || 0;
                     for (let i = existingLineCount - 1; i >= 0; i--) {
                         try { woRec.removeLine({ sublistId: 'item', line: i, ignoreRecalc: true }); } catch (_e) {}
                     }
                 } catch (_e) {}
+                */
 
                 // Components
                 const inputs = (woObj && woObj.inputs) ? woObj.inputs : [];
+
+                // Build an index of existing component lines (BOM/revision suggested) by item id
+                const existingLineCount2 = (() => {
+                    try { return woRec.getLineCount({ sublistId: 'item' }) || 0; } catch (e) { return 0; }
+                })();
+
+                const lineByItemId = {};
+                for (let ln = 0; ln < existingLineCount2; ln++) {
+                    try {
+                        const itemId = woRec.getSublistValue({ sublistId: 'item', fieldId: 'item', line: ln });
+                        if (itemId) lineByItemId[String(itemId)] = ln;
+                    } catch (_e) {}
+                }
+
+                function tryPopulateLineInventoryDetail(lotsArr, ctx) {
+                    const _ctx = ctx || {};
+                    const lotsCount = Array.isArray(lotsArr) ? lotsArr.length : 0;
+                    try {
+                        log.debug({
+                            title: 'COS Repack: tryPopulateLineInventoryDetail start',
+                            details: JSON.stringify({ ..._ctx, lotsCount })
+                        });
+                    } catch (_e) {}
+
+                    if (!Array.isArray(lotsArr) || !lotsArr.length) {
+                        try { log.debug({ title: 'COS Repack: no lots to assign', details: JSON.stringify(_ctx) }); } catch (_e) {}
+                        return;
+                    }
+
+                    try {
+                        let invDet = null;
+                        let invFieldUsed = null;
+
+                        try {
+                            invDet = woRec.getCurrentSublistSubrecord({ sublistId: 'item', fieldId: 'inventorydetail' });
+                            invFieldUsed = 'inventorydetail';
+                        } catch (e1) {
+                            try {
+                                log.debug({
+                                    title: 'COS Repack: inventorydetail subrecord not available',
+                                    details: JSON.stringify({ ..._ctx, error: String(e1) })
+                                });
+                            } catch (_e) {}
+                        }
+
+                        if (!invDet) {
+                            try {
+                                invDet = woRec.getCurrentSublistSubrecord({ sublistId: 'item', fieldId: 'componentinventorydetail' });
+                                invFieldUsed = 'componentinventorydetail';
+                            } catch (e2) {
+                                try {
+                                    log.debug({
+                                        title: 'COS Repack: componentinventorydetail subrecord not available',
+                                        details: JSON.stringify({ ..._ctx, error: String(e2) })
+                                    });
+                                } catch (_e) {}
+                            }
+                        }
+
+                        if (!invDet) {
+                            try {
+                                log.error({
+                                    title: 'COS Repack: NO inventory detail subrecord on this component line',
+                                    details: JSON.stringify(_ctx)
+                                });
+                            } catch (_e) {}
+                            return;
+                        }
+
+                        try {
+                            log.debug({
+                                title: 'COS Repack: inventory detail subrecord acquired',
+                                details: JSON.stringify({ ..._ctx, invFieldUsed })
+                            });
+                        } catch (_e) {}
+
+                        // Clear existing assignments
+                        try {
+                            const c = invDet.getLineCount({ sublistId: 'inventoryassignment' }) || 0;
+                            for (let i = c - 1; i >= 0; i--) {
+                                try { invDet.removeLine({ sublistId: 'inventoryassignment', line: i, ignoreRecalc: true }); } catch (_e) {}
+                            }
+                            try {
+                                log.debug({
+                                    title: 'COS Repack: cleared inventoryassignment lines',
+                                    details: JSON.stringify({ ..._ctx, cleared: c })
+                                });
+                            } catch (_e) {}
+                        } catch (eclr) {
+                            try {
+                                log.debug({
+                                    title: 'COS Repack: failed clearing inventoryassignment',
+                                    details: JSON.stringify({ ..._ctx, error: String(eclr) })
+                                });
+                            } catch (_e) {}
+                        }
+
+                        let assignedLines = 0;
+
+                        // Ensure lots sum matches component qty (best effort)
+                        const targetQty = Number((_ctx && _ctx.qty) || 0);
+                        if (targetQty > 0) {
+                            try {
+                                let sum = 0;
+                                for (let i = 0; i < lotsArr.length; i++) sum += Number((lotsArr[i] && lotsArr[i].qty) || 0);
+                                const diff = Math.round((targetQty - sum) * 1000000) / 1000000;
+                                if (Math.abs(diff) > 0.000001) {
+                                    for (let j = lotsArr.length - 1; j >= 0; j--) {
+                                        const q0 = Number((lotsArr[j] && lotsArr[j].qty) || 0);
+                                        if (q0 > 0) {
+                                            lotsArr[j].qty = Math.round((q0 + diff) * 1000000) / 1000000;
+                                            break;
+                                        }
+                                    }
+                                    try {
+                                        log.debug({ title: 'COS Repack: lot qty adjusted to match component qty', details: JSON.stringify({ ..._ctx, targetQty, sumBefore: sum, diff }) });
+                                    } catch (_e) {}
+                                }
+                            } catch (_e) {}
+                        }
+
+                        lotsArr.forEach((l, idx) => {
+                            if (!l) return;
+                            const q = Number(l.qty || 0);
+                            if (!(q > 0)) return;
+
+                            const key = String(l.key || '');
+                            const parts = key ? key.split('|') : [];
+                            const lotId = parts[0] ? Number(parts[0]) : null;
+                            const binId = parts[1] ? Number(parts[1]) : null;
+                            const statusId = parts[2] ? Number(parts[2]) : null;
+
+                            try {
+                                invDet.selectNewLine({ sublistId: 'inventoryassignment' });
+
+                                let lotFieldUsed = null;
+                                if (lotId) {
+                                    const lotFieldCandidates = ['issueinventorynumber', 'inventorynumber', 'receiptinventorynumber'];
+                                    for (let lf = 0; lf < lotFieldCandidates.length; lf++) {
+                                        const fid = lotFieldCandidates[lf];
+                                        try {
+                                            invDet.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: fid, value: lotId });
+                                            // Verify it "sticks" (some fieldIds will silently reject)
+                                            try {
+                                                const v = invDet.getCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: fid });
+                                                if (v) { lotFieldUsed = fid; break; }
+                                            } catch (_v) {
+                                                // If getCurrentSublistValue isn't available, assume set succeeded
+                                                lotFieldUsed = fid; break;
+                                            }
+                                        } catch (_e) {}
+                                    }
+                                }
+                                if (binId) {
+                                    try { invDet.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: binId }); } catch (_e) {}
+                                }
+                                if (statusId) {
+                                    try { invDet.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'inventorystatus', value: statusId }); } catch (_e) {}
+                                }
+
+                                invDet.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: q });
+                                invDet.commitLine({ sublistId: 'inventoryassignment' });
+                                assignedLines++;
+
+                                try {
+                                    log.debug({
+                                        title: 'COS Repack: inventoryassignment committed',
+                                        details: JSON.stringify({ ..._ctx, idx, key, qty: q, lotId, binId, statusId, lotFieldUsed })
+                                    });
+                                } catch (_e) {}
+                            } catch (eas) {
+                                try {
+                                    log.error({
+                                        title: 'COS Repack: inventoryassignment add failed',
+                                        details: JSON.stringify({ ..._ctx, idx, key, qty: q, error: String(eas) })
+                                    });
+                                } catch (_e) {}
+                            }
+                        });
+
+                        try {
+                            log.debug({
+                                title: 'COS Repack: tryPopulateLineInventoryDetail done',
+                                details: JSON.stringify({ ..._ctx, invFieldUsed, assignedLines })
+                            });
+                        } catch (_e) {}
+                    } catch (e) {
+                        try {
+                            log.error({
+                                title: 'COS Repack: tryPopulateLineInventoryDetail exception',
+                                details: JSON.stringify({ ..._ctx, error: String(e) })
+                            });
+                        } catch (_e) {}
+                    }
+                }
+
                 inputs.forEach((inp) => {
                     if (!inp || !inp.input_item_internalid) return;
                     const qty = Number(inp.input_item_quantity || 0);
                     if (qty <= 0) return;
 
+                    const itemIdStr = String(inp.input_item_internalid);
+                    const lotsArr = Array.isArray(inp.input_item_lots) ? inp.input_item_lots : [];
+
                     try {
-                        woRec.selectNewLine({ sublistId: 'item' });
-                        woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'item', value: Number(inp.input_item_internalid) });
+                        if (lineByItemId[itemIdStr] != null) {
+                            woRec.selectLine({ sublistId: 'item', line: Number(lineByItemId[itemIdStr]) });
 
-                        // Blank out allocation strategies (value 2)
-                        try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
-                        try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
+                            // Blank out allocation strategies (value 2)
+                            try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
+                            try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
 
-                        woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
-                        woRec.commitLine({ sublistId: 'item' });
+                            try {
+                                log.debug({ title: 'COS Repack: setting component qty', details: JSON.stringify({ ...contextInfo, itemId: itemIdStr, qty, lineMode: (lineByItemId[itemIdStr] != null) ? 'existing' : 'new' }) });
+                            } catch (_e) {}
+                            woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
+
+                            // Track lots on the component line (best-effort)
+                            tryPopulateLineInventoryDetail(lotsArr, { ...contextInfo, itemId: itemIdStr, qty });
+
+                            woRec.commitLine({ sublistId: 'item' });
+                        } else {
+                            woRec.selectNewLine({ sublistId: 'item' });
+                            woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'item', value: Number(inp.input_item_internalid) });
+
+                            // Blank out allocation strategies (value 2)
+                            try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
+                            try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
+
+                            try {
+                                log.debug({ title: 'COS Repack: setting component qty', details: JSON.stringify({ ...contextInfo, itemId: itemIdStr, qty, lineMode: (lineByItemId[itemIdStr] != null) ? 'existing' : 'new' }) });
+                            } catch (_e) {}
+                            woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
+
+                            tryPopulateLineInventoryDetail(lotsArr, { ...contextInfo, itemId: itemIdStr, qty });
+
+                            woRec.commitLine({ sublistId: 'item' });
+                        }
                     } catch (lineErr) {
                         // If item sublist isn't editable (BOM-driven), we still allow WO creation and log the issue.
                         try {
                             log.error({
-                                title: 'COS Repack: component line add failed',
+                                title: 'COS Repack: component line update/add failed',
                                 details: JSON.stringify({ ...contextInfo, input_item_internalid: inp.input_item_internalid, error: String(lineErr) })
                             });
                         } catch (_e) {}
