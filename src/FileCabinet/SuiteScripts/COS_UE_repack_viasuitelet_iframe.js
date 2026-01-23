@@ -2599,6 +2599,11 @@ function showStep2(){
             const newRecord = scriptContext.newRecord;
             const payload = buildWorkordersPayload(newRecord);
 
+            // Repack flag: if checked, mark created Work Orders as WIP
+            const repackMarkWipRaw = newRecord.getValue({ fieldId: 'custrecord_cos_rep_wip' });
+            const repackMarkWip = (repackMarkWipRaw === true || repackMarkWipRaw === 'T' || repackMarkWipRaw === 'true');
+            try { log.debug({ title: 'COS Repack: repackMarkWip', details: String(repackMarkWipRaw) + ' => ' + String(repackMarkWip) }); } catch (_e) {}
+
             // Validate against the submitted summary payload (shape + reconciliation checks)
             const rawSummary = newRecord.getValue({ fieldId: 'custpage_cos_summary_payload' })
                 || newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' })
@@ -2622,7 +2627,7 @@ function showStep2(){
             });
 
             // Create Work Orders
-            const createdWorkOrders = createWorkOrdersFromPayload(payload);
+            const createdWorkOrders = createWorkOrdersFromPayload(payload, repackMarkWip);
             try {
                 log.audit({
                     title: 'COS Repack: workorders created',
@@ -2645,9 +2650,13 @@ function showStep2(){
      * - Lots are intentionally not applied here; inventory detail is typically applied during issue/build.
      * - Component lines are added to the WO's item sublist to match the chosen inputs.
      */
-    function createWorkOrdersFromPayload(payload) {
+    function createWorkOrdersFromPayload(payload, markWorkordersAsWip) {
         const results = [];
         const workorders = (payload && payload.workorders) ? payload.workorders : [];
+
+// Normalize flag (checkbox fields can sometimes come through as true/false or 'T'/'F')
+        markWorkordersAsWip = (markWorkordersAsWip === true || markWorkordersAsWip === 'T' || markWorkordersAsWip === 'true');
+
 
         workorders.forEach((woObj, idx) => {
             const contextInfo = { index: idx, output_item_internalid: woObj && woObj.output_item_internalid };
@@ -2664,7 +2673,17 @@ function showStep2(){
 
 
 
-                // Work Order status
+
+
+                // Mark as WIP if requested on the Repack record
+                if (markWorkordersAsWip) {
+                    try { woRec.setValue({ fieldId: 'iswip', value: true }); } catch (_e) {
+                        // Defensive: some accounts may expose a different field id
+                        try { woRec.setValue({ fieldId: 'isWip', value: true }); } catch (_e2) {}
+                        try { woRec.setValue({ fieldId: 'usewip', value: true }); } catch (_e3) {}
+                    }
+                }
+// Work Order status
                 try { woRec.setValue({ fieldId: 'orderstatus', value: 'B' }); } catch (_e) {}
 // Work Order item field is commonly 'assemblyitem' (preferred); some accounts expose 'item'.
                 try {
@@ -3008,9 +3027,16 @@ function showStep2(){
                     }
                 });
 
-
+                // Debug: confirm WIP value before save
+                try { log.debug({ title: 'COS Repack: WO iswip (pre-save)', details: String(woRec.getValue({ fieldId: 'iswip' })) }); } catch (_e) {}
 
                 const woId = woRec.save({ enableSourcing: true, ignoreMandatoryFields: false });
+                // Debug: verify persisted WIP value
+                try {
+                    const woVerify = record.load({ type: record.Type.WORK_ORDER, id: woId, isDynamic: false });
+                    const wipPersisted = woVerify.getValue({ fieldId: 'iswip' });
+                    log.debug({ title: 'COS Repack: WO iswip (persisted)', details: String(wipPersisted) });
+                } catch (_e) {}
                 results.push({ index: idx, workorderId: woId, output_item_internalid: woObj.output_item_internalid, output_item_quantity: woObj.output_item_quantity });
 
             } catch (err) {
