@@ -2,7 +2,7 @@
  * @NApiVersion 2.x
  * @NScriptType Suitelet
  */
-define(['N/record', 'N/render'], function (record, render) {
+define(['N/record', 'N/render', 'N/search'], function (record, render, search) {
 
     function xmlEscape(s) {
         if (s === null || s === undefined) return '';
@@ -60,128 +60,190 @@ define(['N/record', 'N/render'], function (record, render) {
             + '</table>';
     }
 
-    function buildOutputsSummary(summary) {
-        var outs = (summary && summary.outputs) ? summary.outputs : [];
+
+    /**
+     * Build distribution card matching the screenshot:
+     * For each output: "OUTPUT NAME | idx (share%)"
+     * Then a 2-col table: Input | Allocated Qty
+     */
+    function buildDistributionCard(summary) {
+        var outs = (summary && Array.isArray(summary.outputs)) ? summary.outputs : [];
+        var inputsArr = (summary && Array.isArray(summary.inputs)) ? summary.inputs : [];
+        // Map input item id -> display name for quick lookup
+        var inputNameById = {};
+        for (var i0 = 0; i0 < inputsArr.length; i0++) {
+            var it = inputsArr[i0] || {};
+            var iid = String(it.id || it.item_internalid || it.input_item_internalid || '');
+            if (!iid) continue;
+            inputNameById[iid] = it.name || it.item_name || it.item_text || inputNameById[iid] || ('Item ' + iid);
+        }
+
+        var dist = summary && summary.distribution ? summary.distribution : null;
+        var alloc = dist ? dist.allocations : null;
+
         if (!outs || !outs.length) {
             return '<div class="muted">No outputs found in summary payload.</div>';
         }
+        if (!alloc || typeof alloc !== 'object') {
+            return '<div class="muted">No allocation map found in summary payload.</div>';
+        }
 
-        var html = '';
-        html += '<table class="tbl" width="100%" cellspacing="0" cellpadding="4">';
-        html += '<tr>'
-            + '<th>Output</th>'
-            + '<th align="right">Qty</th>'
-            + '<th align="right">Conv</th>'
-            + '<th align="right">Share</th>'
-            + '</tr>';
+        // Two possible shapes observed in COS:
+        // Shape A (VIEW UI / common): alloc[<outId>][<inId>] = qty
+        // Shape B (older / alternative): alloc[<inId>] = { item_name, total_qty, allocations: { <outId>: qty } }
+        function rowsForOutput(outId) {
+            var rows = [];
 
+            // Detect Shape A
+            var maybeOutMap = alloc[outId];
+            if (maybeOutMap && typeof maybeOutMap === 'object' && !Array.isArray(maybeOutMap) && !maybeOutMap.allocations) {
+                for (var inId in maybeOutMap) {
+                    if (!maybeOutMap.hasOwnProperty(inId)) continue;
+                    var q = maybeOutMap[inId];
+                    if (safeNum(q) > 0) {
+                        var nmA = inputNameById[String(inId)] || ('Item ' + inId);
+                        rows.push({ name: nmA, allocQty: q });
+                    }
+                }
+                return rows;
+            }
+
+            // Fallback: Shape B
+            for (var srcId in alloc) {
+                if (!alloc.hasOwnProperty(srcId)) continue;
+                var src = alloc[srcId] || {};
+                var allocations = src.allocations || {};
+                var q2 = allocations[outId] !== undefined ? allocations[outId] : 0;
+                if (safeNum(q2) > 0) {
+                    var nmB = src.item_name || src.item_text || inputNameById[String(srcId)] || ('Item ' + srcId);
+                    rows.push({ name: nmB, allocQty: q2 });
+                }
+            }
+            return rows;
+        }
+
+        var html = '<div class="card">';
         for (var i = 0; i < outs.length; i++) {
             var o = outs[i] || {};
-            var outName = o.item_name || o.item_text || ('Item ' + (o.item_internalid || ''));
-            var outQty = (o.qty !== undefined ? o.qty : o.output_qty);
-            var outConv = (o.conversion !== undefined ? o.conversion : o.output_conversion);
+            var outId = String(o.id || o.item_internalid || o.output_item_internalid || '');
+            var outName = o.name || o.item_name || o.item_text || ('Item ' + outId);
+
+            // share percent display
             var share = (o.share !== undefined ? o.share : o.output_share);
+            var sharePct = (safeNum(share) * 100);
+            var shareTxt = fmt(sharePct, 6) + '%';
 
-            html += '<tr>'
-                + '<td>' + xmlEscape(outName) + '</td>'
-                + '<td align="right">' + xmlEscape(fmt(outQty, 3)) + '</td>'
-                + '<td align="right">' + xmlEscape(fmt(outConv, 6)) + '</td>'
-                + '<td align="right">' + xmlEscape(fmt(safeNum(share) * 100, 2)) + '%</td>'
-                + '</tr>';
+            html += ''
+                + '<div class="outBlock">'
+                +   '<div class="outHeader">'
+                +     '<span class="outTitle">' + xmlEscape(outName) + '</span>'
+                +     '<span class="outMeta">' + xmlEscape(String(i + 1)) + ' &nbsp;(' + xmlEscape(shareTxt) + ')</span>'
+                +   '</div>'
+                +   '<table class="miniTable" width="100%" cellspacing="0" cellpadding="4">'
+                +     '<tr><th align="left">Input</th><th align="right">Allocated Qty</th></tr>';
+
+            var rows = rowsForOutput(outId);
+
+            if (!rows.length) {
+                html += '<tr><td class="muted">No inputs allocated.</td><td align="right">0</td></tr>';
+            } else {
+                rows.sort(function (a, b) {
+                    var an = (a.name || '').toLowerCase();
+                    var bn = (b.name || '').toLowerCase();
+                    return an < bn ? -1 : (an > bn ? 1 : 0);
+                });
+                for (var r = 0; r < rows.length; r++) {
+                    html += '<tr>'
+                        + '<td>' + xmlEscape(rows[r].name) + '</td>'
+                        + '<td align="right">' + xmlEscape(fmt(rows[r].allocQty, 6)) + '</td>'
+                        + '</tr>';
+                }
+            }
+
+            html += '</table></div>';
         }
-        html += '</table>';
+        html += '</div>';
         return html;
     }
 
-    function buildAllocationDetail(summary) {
-        var outs = (summary && summary.outputs) ? summary.outputs : [];
-        var dist = summary && summary.distribution ? summary.distribution : null;
+    function lookupItemConversion(itemId, convCache) {
+        if (!itemId) return 0;
+        if (convCache[itemId] !== undefined) return convCache[itemId];
 
-        // Inventory allocations
-        var invAllocMap = dist && dist.allocations ? dist.allocations : null;
-        // Purchase allocations
-        var poAllocMap = dist && (dist.purchaseAllocations || dist.poAllocations) ? (dist.purchaseAllocations || dist.poAllocations) : null;
-
-        if (!outs || !outs.length) return '<div class="muted">No allocation detail (no outputs).</div>';
-        if (!invAllocMap && !poAllocMap) return '<div class="muted">No allocation maps found in summary payload.</div>';
-
-        var html = '';
-
-        for (var i = 0; i < outs.length; i++) {
-            var o = outs[i] || {};
-            var outId = String(o.item_internalid || o.output_item_internalid || '');
-            var outName = o.item_name || o.item_text || ('Item ' + outId);
-
-            html += '<div class="subttl">Allocations for: ' + xmlEscape(outName) + '</div>';
-
-            html += '<table class="tbl" width="100%" cellspacing="0" cellpadding="4">';
-            html += '<tr>'
-                + '<th>Source</th>'
-                + '<th>Type</th>'
-                + '<th align="right">Total Qty</th>'
-                + '<th align="right">Allocated Qty</th>'
-                + '</tr>';
-
-            // Inventory rows
-            var invRows = getAllocForOut(invAllocMap, outId);
-            for (var a = 0; a < invRows.length; a++) {
-                var r = invRows[a];
-                var nm = r.sourceName || ('Item ' + r.sourceItemId);
-                html += '<tr>'
-                    + '<td>' + xmlEscape(nm) + '</td>'
-                    + '<td>INPUT</td>'
-                    + '<td align="right">' + xmlEscape(fmt(r.totalQty, 3)) + '</td>'
-                    + '<td align="right">' + xmlEscape(fmt(r.allocQty, 3)) + '</td>'
-                    + '</tr>';
-            }
-
-            // PO rows
-            var poRows = getAllocForOut(poAllocMap, outId);
-            for (var b = 0; b < poRows.length; b++) {
-                var pr = poRows[b];
-                var pnm = pr.sourceName || ('Item ' + pr.sourceItemId);
-                html += '<tr>'
-                    + '<td>' + xmlEscape(pnm) + '</td>'
-                    + '<td>PO</td>'
-                    + '<td align="right">' + xmlEscape(fmt(pr.totalQty, 3)) + '</td>'
-                    + '<td align="right">' + xmlEscape(fmt(pr.allocQty, 3)) + '</td>'
-                    + '</tr>';
-            }
-
-            html += '</table>';
+        var conv = 0;
+        try {
+            var lf = search.lookupFields({
+                type: 'item',
+                id: itemId,
+                columns: ['custitem_repack_conversion']
+            });
+            // NetSuite returns number as string sometimes
+            conv = lf && lf.custitem_repack_conversion ? safeNum(lf.custitem_repack_conversion) : 0;
+        } catch (e) {
+            conv = 0;
         }
 
-        return html;
+        convCache[itemId] = conv;
+        return conv;
     }
 
-    function buildWorkordersTable(summary) {
-        // Best-effort: look for summary.meta.workorders
-        var meta = summary && summary.meta ? summary.meta : null;
-        var wos = meta && meta.workorders ? meta.workorders : null;
+    function buildWorkordersTableFromSearch(repackId) {
+        var rows = [];
+        var convCache = {};
 
-        if (!wos || !wos.length) {
-            return '<div class="muted">No workorders found in payload (summary.meta.workorders).</div>';
+        search.create({
+            type: search.Type.WORK_ORDER,
+            filters: [
+                ['mainline', 'is', 'T'], 'and',
+                ['custbody_cos_createdfromrepack', 'anyof', String(repackId)]
+            ],
+            columns: [
+                search.createColumn({ name: 'tranid' }),
+                search.createColumn({ name: 'item' }),
+                search.createColumn({ name: 'quantity' })
+            ]
+        }).run().each(function (r) {
+            var assemblyId = r.getValue({ name: 'item' });
+            var assemblyText = r.getText({ name: 'item' }) || '';
+            var qty = safeNum(r.getValue({ name: 'quantity' }));
+            var conv = lookupItemConversion(assemblyId, convCache);
+            var weight = qty * conv;
+
+            rows.push({
+                tranid: r.getValue({ name: 'tranid' }) || '',
+                assemblyText: assemblyText,
+                qty: qty,
+                weight: weight
+            });
+            return true;
+        });
+
+        if (!rows.length) {
+            return '<div class="muted">No work orders found for this repack.</div>';
         }
 
         var html = '';
-        html += '<table class="tbl" width="100%" cellspacing="0" cellpadding="4">';
+        html += '<table class="tbl2" width="100%" cellspacing="0" cellpadding="4">';
         html += '<tr>'
-            + '<th>Work Order</th>'
-            + '<th>Assembly</th>'
+            + '<th align="left">Work Order #</th>'
+            + '<th align="left">Assembly Item</th>'
             + '<th align="right">Assembly Qty</th>'
+            + '<th align="right">Assembly Weight</th>'
             + '</tr>';
 
-        for (var i = 0; i < wos.length; i++) {
-            var w = wos[i] || {};
-            var woId = w.id || w.workorderid || w.internalid || '';
-            var woTran = w.tranid || w.tranId || ('WO ' + woId);
-            var asmName = w.assembly_item_name || w.assemblyName || w.assembly_item_text || '';
-            var asmQty = w.assembly_qty !== undefined ? w.assembly_qty : w.qty;
+        for (var i = 0; i < rows.length; i++) {
+            var w = rows[i];
+            // Match screenshot: WO#1, WO#2...
+            var label = 'WO#' + (i + 1);
+
+            // Weight: show 0 decimals if it's basically an integer, else 3
+            var wDec = (Math.abs(w.weight - Math.round(w.weight)) < 0.000001) ? 0 : 3;
 
             html += '<tr>'
-                + '<td>' + xmlEscape(String(woTran)) + '</td>'
-                + '<td>' + xmlEscape(String(asmName || '')) + '</td>'
-                + '<td align="right">' + xmlEscape(fmt(asmQty, 3)) + '</td>'
+                + '<td>' + xmlEscape(label) + '</td>'
+                + '<td>' + xmlEscape(w.assemblyText) + '</td>'
+                + '<td align="right">' + xmlEscape(fmt(w.qty, 0)) + '</td>'
+                + '<td align="right">' + xmlEscape(fmt(w.weight, wDec)) + '</td>'
                 + '</tr>';
         }
 
@@ -220,9 +282,8 @@ define(['N/record', 'N/render'], function (record, render) {
         var summary = parseJsonMaybe(summaryStr) || {};
 
         var headerHtml = buildHeaderSection(subsTxt, locTxt, speciesTxt);
-        var outputsHtml = buildOutputsSummary(summary);
-        var allocHtml = buildAllocationDetail(summary);
-        var wosHtml = buildWorkordersTable(summary);
+        var distHtml = buildDistributionCard(summary);
+        var wosHtml = buildWorkordersTableFromSearch(recid);
 
         var xml =
             '<?xml version="1.0"?>' +
@@ -231,38 +292,36 @@ define(['N/record', 'N/render'], function (record, render) {
             '<head>' +
             '  <style type="text/css">' +
             '    body { font-family: Helvetica, Arial, sans-serif; font-size: 10px; }' +
-            '    .ttl { font-size: 16px; font-weight: bold; margin-bottom: 6px; }' +
-            '    .sec { margin-top: 12px; }' +
-            '    .secttl { font-size: 12px; font-weight: bold; margin: 8px 0 4px 0; }' +
-            '    .subttl { font-size: 10px; font-weight: bold; margin: 8px 0 4px 0; }' +
             '    .muted { color: #666666; }' +
-            '    table.tbl { border: 1px solid #cccccc; }' +
-            '    table.tbl th { background-color: #eeeeee; border-bottom: 1px solid #cccccc; }' +
-            '    table.tbl td, table.tbl th { border-right: 1px solid #cccccc; }' +
-            '    table.kv td.k { width: 25%; font-weight: bold; background-color: #f7f7f7; border: 1px solid #dddddd; }' +
-            '    table.kv td.v { border: 1px solid #dddddd; }' +
+            '    .sectionTitle { font-size: 12px; font-weight: bold; padding: 6px 8px; border: 1px solid #3b3b3b; background-color: #e7eefc; }' +
+            '    table.kv { border-collapse: collapse; }' +
+            '    table.kv td { border: 1px solid #3b3b3b; }' +
+            '    table.kv td.k { width: 25%; font-weight: bold; background-color: #f3f6ff; }' +
+            '    table.kv td.v { }' +
+            '    .card { border: 1px solid #cfcfcf; background-color: #ffffff; padding: 10px; margin-top: 10px; }' +
+            '    .outBlock { border: 1px solid #e0e0e0; margin-bottom: 10px; }' +
+            '    .outHeader { background-color: #f2f2f2; padding: 6px 8px; }' +
+            '    .outTitle { font-weight: bold; }' +
+            '    .outMeta { float: right; }' +
+            '    table.miniTable { border-collapse: collapse; }' +
+            '    table.miniTable th { background-color: #fafafa; border-bottom: 1px solid #e0e0e0; }' +
+            '    table.miniTable td, table.miniTable th { padding: 6px 8px; }' +
+            '    table.miniTable td { border-bottom: 1px solid #f0f0f0; }' +
+            '    .woTitle { font-weight: bold; font-size: 12px; margin-top: 12px; }' +
+            '    table.tbl2 { border-collapse: collapse; margin-top: 6px; }' +
+            '    table.tbl2 th { background-color: #e7eefc; border: 1px solid #3b3b3b; }' +
+            '    table.tbl2 td, table.tbl2 th { border: 1px solid #3b3b3b; padding: 6px 8px; }' +
             '  </style>' +
             '</head>' +
             '<body>' +
-            '  <div class="ttl">Repack Print</div>' +
 
-            '  <div class="sec">' +
-            '    <div class="secttl">Repack Header</div>' +
+            ' Repack #' + (repRec.getValue({fieldId : "id"}) || repRec.getValue({fieldId : "internalid"})) + ' ' +
             headerHtml +
-            '  </div>' +
 
-            '  <div class="sec">' +
-            '    <div class="secttl">Repack Summary</div>' +
-            '    <div class="subttl">Outputs</div>' +
-            outputsHtml +
-            '    <div class="subttl">Allocations</div>' +
-            allocHtml +
-            '  </div>' +
+            distHtml +
 
-            '  <div class="sec">' +
-            '    <div class="secttl">Work Orders</div>' +
+            '  <div class="woTitle">Work Orders</div>' +
             wosHtml +
-            '  </div>' +
 
             '</body>' +
             '</pdf>';
