@@ -2912,9 +2912,9 @@ function showStep2(){
                         if (lineByItemId[itemIdStr] != null) {
                             woRec.selectLine({ sublistId: 'item', line: Number(lineByItemId[itemIdStr]) });
 
-                            // Blank out allocation strategies (value 2)
-                            try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
-                            try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
+                            // // Blank out allocation strategies (value 2)
+                            // try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
+                            // try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
 
                             try {
                                 log.debug({ title: 'COS Repack: setting component qty', details: JSON.stringify({ ...contextInfo, itemId: itemIdStr, qty, lineMode: (lineByItemId[itemIdStr] != null) ? 'existing' : 'new' }) });
@@ -2929,9 +2929,9 @@ function showStep2(){
                             woRec.selectNewLine({ sublistId: 'item' });
                             woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'item', value: Number(inp.input_item_internalid) });
 
-                            // Blank out allocation strategies (value 2)
-                            try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
-                            try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
+                            // // Blank out allocation strategies (value 2)
+                            // try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
+                            // try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
 
                             try {
                                 log.debug({ title: 'COS Repack: setting component qty', details: JSON.stringify({ ...contextInfo, itemId: itemIdStr, qty, lineMode: (lineByItemId[itemIdStr] != null) ? 'existing' : 'new' }) });
@@ -2964,9 +2964,9 @@ function showStep2(){
                         woRec.selectNewLine({ sublistId: 'item' });
                         woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'item', value: Number(inp.item_internalid) });
 
-                        // Blank out allocation strategies (value 2 / blank)
-                        try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
-                        try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
+                        // // Blank out allocation strategies (value 2 / blank)
+                        // try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
+                        // try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
 
                         try {
                             log.debug({ title: 'COS Repack: setting PO component qty', details: JSON.stringify({ ...contextInfo, itemId: String(inp.item_internalid), qty }) });
