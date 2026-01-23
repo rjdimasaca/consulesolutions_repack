@@ -116,8 +116,10 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
   var outs = Array.isArray(summary.outputs) ? summary.outputs : [];
   var ins  = Array.isArray(summary.inputs) ? summary.inputs : [];
+  // Purchase Order lines are stored by the interactive UI under summary.purchase
+  var pos  = Array.isArray(summary.purchase) ? summary.purchase : (Array.isArray(summary.purchaseOrder) ? summary.purchaseOrder : []);
 
-  if (!outs.length || !ins.length){
+  if (!outs.length || (!ins.length && !pos.length)){
     body.innerHTML = '<div class="cos_empty">No saved summary to display. Build the summary and save the record.</div>';
     return;
   }
@@ -133,6 +135,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
   outs = outs.map(normalizeRow);
   ins  = ins.map(normalizeRow);
+  pos  = (Array.isArray(pos) ? pos : []).map(normalizeRow);
 
   function buildBox(title, rows){
     var html = '';
@@ -227,6 +230,35 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     });
   }
 
+  // Purchase Order allocation map: prefer saved distribution.purchaseAllocations, else compute
+  var poAllocMap = {};
+  try{
+    if (summary && summary.distribution && summary.distribution.purchaseAllocations && typeof summary.distribution.purchaseAllocations === 'object'){
+      poAllocMap = summary.distribution.purchaseAllocations;
+    }
+  }catch(e){}
+  if (!poAllocMap || typeof poAllocMap !== 'object') poAllocMap = {};
+
+  if (pos && pos.length && !Object.keys(poAllocMap).length){
+    outReqs.forEach(function(or){ poAllocMap[String(or.id)] = {}; });
+    pos.forEach(function(p){
+      var pQty = toNum(p.qty);
+      var running = 0;
+      for (var i=0;i<outReqs.length;i++){
+        var or = outReqs[i];
+        var q = 0;
+        if (i === outReqs.length - 1){
+          q = pQty - running;
+        } else {
+          q = pQty * (or.share || 0);
+          q = toNum(roundNice(q));
+          running += q;
+        }
+        poAllocMap[String(or.id)][String(p.id)] = q;
+      }
+    });
+  }
+
   function buildDistBoxUsingMap(outReq){
     var html = '';
     html += '<div class="cos_sum_box">';
@@ -256,6 +288,24 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
            +  '</div>';
     });
 
+    if (pos && pos.length){
+      html += '<div class="cos_dist_row" style="font-weight:bold;background:#f7f7f7;">'
+           +  '<div>Purchase Order</div><div class="cos_dist_right"></div><div class="cos_dist_right"></div>'
+           +  '</div>';
+
+      pos.forEach(function(p){
+        var q = (poAllocMap[String(outReq.id)] && poAllocMap[String(outReq.id)][String(p.id)] != null)
+          ? poAllocMap[String(outReq.id)][String(p.id)]
+          : 0;
+
+        html += '<div class="cos_dist_row">'
+             +  '<div>' + (p.name ? ('[PO] ' + p.name) : '[PO]') + '</div>'
+             +  '<div class="cos_dist_right">' + roundNice(q) + '</div>'
+             +  '<div class="cos_dist_right"></div>'
+             +  '</div>';
+      });
+    }
+
     html += '</div>'; // .cos_dist_body
     html += '</div>';
     return html;
@@ -284,12 +334,13 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   var html2 = '';
   html2 += '<div class="cos_sum_grid">';
   html2 += buildBox('Outputs', outs);
-  html2 += buildBox('Inputs', ins);
+  if (ins.length) html2 += buildBox('Inputs', ins);
+  if (pos.length) html2 += buildBox('Purchase Order', pos);
   html2 += '</div>';
 
   html2 += '<div class="cos_dist_wrap">';
-  html2 += '<div class="cos_dist_title">Prorated Distribution of Inputs → Outputs</div>';
-  html2 += '<div class="cos_dist_sub">Inputs are distributed across outputs based on each of their share of the total requirement (Qty × Conversion). If conversions are missing, the share falls back to output quantities.</div>';
+  html2 += '<div class="cos_dist_title">Prorated Distribution of Sources → Outputs</div>';
+  html2 += '<div class="cos_dist_sub">Inputs and Purchase Order lines are distributed across outputs based on each of their share of the total requirement (Qty × Conversion). If conversions are missing, the share falls back to output quantities.</div>';
   html2 += '<div class="cos_dist_grid">';
   outReqs.forEach(function(or){
     html2 += buildDistBoxUsingMap(or);
@@ -1558,6 +1609,27 @@ function showStep2(){
       }
     });
 
+    // Also allocate Purchase Order lines across outputs by the same shares
+    var poAllocMap = {}; // outId -> poItemId -> qty
+    outReqs.forEach(function(or){ poAllocMap[String(or.id)] = {}; });
+
+    pos.forEach(function(p){
+      var pQty = toNum(p.qty);
+      var runningP = 0;
+      for (var i=0;i<outReqs.length;i++){
+        var or = outReqs[i];
+        var qP = 0;
+        if (i === outReqs.length - 1){
+          qP = pQty - runningP;
+        } else {
+          qP = pQty * (or.share || 0);
+          qP = toNum(roundNice(qP));
+          runningP += qP;
+        }
+        poAllocMap[String(or.id)][String(p.id)] = qP;
+      }
+    });
+
     function buildDistBoxUsingMap(outReq){
       var html = '';
       html += '<div class="cos_sum_box">';
@@ -1587,6 +1659,24 @@ function showStep2(){
              +  '</div>';
       });
 
+      if (pos.length){
+        html += '<div class="cos_dist_row" style="font-weight:bold;background:#f7f7f7;">'
+             +  '<div>Purchase Order</div><div class="cos_dist_right"></div><div class="cos_dist_right"></div>'
+             +  '</div>';
+
+        pos.forEach(function(p){
+          var pq = (poAllocMap[String(outReq.id)] && poAllocMap[String(outReq.id)][String(p.id)] != null)
+            ? poAllocMap[String(outReq.id)][String(p.id)]
+            : 0;
+
+          html += '<div class="cos_dist_row">'
+               +  '<div>' + (p.name ? ('[PO] ' + p.name) : '[PO]') + '</div>'
+               +  '<div class="cos_dist_right">' + roundNice(pq) + '</div>'
+               +  '<div class="cos_dist_right"></div>'
+               +  '</div>';
+        });
+      }
+
       html += '</div>'; // .cos_dist_body
 
       html += '</div>';
@@ -1596,7 +1686,7 @@ function showStep2(){
     var html2 = '';
     html2 += '<div class="cos_sum_grid">';
     html2 += buildBox('Outputs', outs);
-    html2 += buildBox('Inputs', ins);
+    if (ins.length) html2 += buildBox('Inputs', ins);
     if (pos.length) html2 += buildBox('Purchase Order', pos);
     html2 += '</div>';
 
@@ -1624,8 +1714,8 @@ function showStep2(){
 
     // Distribution section
     html2 += '<div class="cos_dist_wrap">';
-    html2 += '<div class="cos_dist_title">Prorated Distribution of Inputs → Outputs</div>';
-    html2 += '<div class="cos_dist_sub">Inputs are distributed across outputs based on each of their share of the total requirement (Qty × Conversion). If conversions are missing, the share falls back to output quantities.</div>';
+    html2 += '<div class="cos_dist_title">Prorated Distribution of Sources → Outputs</div>';
+    html2 += '<div class="cos_dist_sub">Inputs and Purchase Order lines are distributed across outputs based on each of their share of the total requirement (Qty × Conversion). If conversions are missing, the share falls back to output quantities.</div>';
     html2 += '<div class="cos_dist_grid">';
     outReqs.forEach(function(or){
       html2 += buildDistBoxUsingMap(or);
@@ -1868,13 +1958,16 @@ function showStep2(){
 
         const outputs = Array.isArray(summary.outputs) ? summary.outputs : [];
         const inputs = Array.isArray(summary.inputs) ? summary.inputs : [];
+        const purchase = Array.isArray(summary.purchase) ? summary.purchase : [];
 
         const subsidiary = newRecord.getValue({ fieldId: 'custrecord_cos_rep_subsidiary' });
         const location = newRecord.getValue({ fieldId: 'custrecord_cos_rep_location' });
 
+        // Fetch conversions for any item we may touch
         const itemIds = [];
         outputs.forEach(o => { if (o && o.id) itemIds.push(String(o.id)); });
         inputs.forEach(i => { if (i && i.id) itemIds.push(String(i.id)); });
+        purchase.forEach(p => { if (p && p.id) itemIds.push(String(p.id)); });
 
         const convMap = fetchConversionMap(itemIds);
 
@@ -1911,7 +2004,6 @@ function showStep2(){
             }
         }
 
-
         // Output requirements (Qty × Conversion). If conversion missing, fallback to qty-only share.
         const outReq = outputs.map((o) => {
             const outId = o && o.id ? String(o.id) : '';
@@ -1927,31 +2019,72 @@ function showStep2(){
             shares[o.outId] = totalReq > 0 ? (toNum(o.req) / totalReq) : 0;
         });
 
-        // Allocate each input container qty across outputs using shares.
-        // Rounding: round to 6dp and adjust last output per input to keep totals matching.
-        const allocationsByOut = {}; // outId -> [ {inputId, qty, lots} ]
-        outReq.forEach(o => { allocationsByOut[o.outId] = []; });
+        // Allocate each SOURCE (inventory inputs + purchase lines) across outputs using OUTPUT SHARES.
+        // IMPORTANT: allocation is done by weight (Qty × Conversion) then converted back to qty per source item.
+        // Rounding: round to 6dp and adjust last output per source to keep totals matching (in weight domain).
+        const allocationsInvByOut = {}; // outId -> [ {input_item_internalid, input_item_quantity, input_item_lots } ]
+        const allocationsPoByOut = {};  // outId -> [ {po_item_internalid, po_item_quantity } ]
+        outReq.forEach(o => {
+            allocationsInvByOut[o.outId] = [];
+            allocationsPoByOut[o.outId] = [];
+        });
 
-        inputs.forEach((inp) => {
-            const inputId = inp && inp.id ? String(inp.id) : '';
-            if (!inputId) return;
-            const inputQty = toNum(inp.qty);
+        function allocateSourceAcrossOutputs(srcId, srcQty, srcLotsArr, isPurchase) {
             const outIds = outReq.map(o => o.outId);
             if (!outIds.length) return;
 
-            let running = 0;
+            const conv = convMap[String(srcId)] || 0;
+            const qtyNum = toNum(srcQty);
+
+            // Weight domain for fair distribution: weight = qty * conv (fallback to qty if conv missing)
+            const totalWeight = (conv > 0) ? (qtyNum * conv) : qtyNum;
+            if (!(totalWeight > 0)) return;
+
+            let runningWeight = 0;
+
             outIds.forEach((outId, idx) => {
                 const isLast = (idx === outIds.length - 1);
-                let alloc = isLast ? (inputQty - running) : round6(inputQty * (shares[outId] || 0));
-                alloc = round6(alloc);
-                running = round6(running + alloc);
 
-                allocationsByOut[outId].push({
-                    input_item_internalid: Number(inputId),
-                    input_item_quantity: alloc,
-                    input_item_lots: prorateLotsForAllocation((Array.isArray(lotsMap[inputId]) ? lotsMap[inputId] : []), alloc, inputQty)
-                });
+                let allocWeight = isLast ? (totalWeight - runningWeight) : round6(totalWeight * (shares[outId] || 0));
+                allocWeight = round6(allocWeight);
+                runningWeight = round6(runningWeight + allocWeight);
+
+                // Convert allocated weight back into qty for this source item
+                let allocQty = (conv > 0) ? (allocWeight / conv) : allocWeight;
+                allocQty = round6(allocQty);
+
+                if (isPurchase) {
+                    allocationsPoByOut[outId].push({
+                        po_item_internalid: Number(srcId),
+                        po_item_quantity: allocQty
+                    });
+                } else {
+                    allocationsInvByOut[outId].push({
+                        input_item_internalid: Number(srcId),
+                        input_item_quantity: allocQty,
+                        input_item_lots: prorateLotsForAllocation((Array.isArray(srcLotsArr) ? srcLotsArr : []), allocQty, qtyNum)
+                    });
+                }
             });
+        }
+
+        // Inventory inputs
+        inputs.forEach((inp) => {
+            const inputId = inp && inp.id ? String(inp.id) : '';
+            if (!inputId) return;
+            allocateSourceAcrossOutputs(
+                inputId,
+                inp.qty,
+                (Array.isArray(lotsMap[inputId]) ? lotsMap[inputId] : []),
+                false
+            );
+        });
+
+        // Purchase lines (no lots)
+        purchase.forEach((po) => {
+            const poId = po && po.id ? String(po.id) : '';
+            if (!poId) return;
+            allocateSourceAcrossOutputs(poId, po.qty, [], true);
         });
 
         const workorders = outReq.map((o) => {
@@ -1960,7 +2093,8 @@ function showStep2(){
                 location: location ? Number(location) : location,
                 output_item_internalid: Number(o.outId),
                 output_item_quantity: o.qty,
-                inputs: allocationsByOut[o.outId] || []
+                inputs: allocationsInvByOut[o.outId] || [],
+                purchase: allocationsPoByOut[o.outId] || []
             };
         });
 
@@ -1982,6 +2116,9 @@ function showStep2(){
         const summary = safeParseJson(rawSummary) || {};
         const summaryInputs = Array.isArray(summary.inputs) ? summary.inputs : [];
         const summaryOutputs = Array.isArray(summary.outputs) ? summary.outputs : [];
+        const summaryPurchase = Array.isArray(summary.purchase) ? summary.purchase
+            : (Array.isArray(summary.purchaseOrder) ? summary.purchaseOrder
+                : (Array.isArray(summary.po) ? summary.po : []));
 
         if (!payload || typeof payload !== 'object') {
             addErr('PAYLOAD_MISSING', 'Payload is missing or not an object.');
@@ -2043,6 +2180,30 @@ function showStep2(){
                     }
                 });
             }
+
+            // Optional: validate PO lines if provided
+            if (typeof wo.purchase !== 'undefined') {
+                if (!Array.isArray(wo.purchase)) {
+                    addErr('WO_PURCHASE_NOT_ARRAY', path + '.purchase must be an array when present.');
+                } else {
+                    wo.purchase.forEach((p, kdx) => {
+                        const ppath = path + '.purchase[' + kdx + ']';
+                        if (!p || typeof p !== 'object') {
+                            addErr('PO_NOT_OBJECT', ppath + ' is not an object.');
+                            return;
+                        }
+                        const pid = toNum(p.po_item_internalid);
+                        if (!(pid > 0)) {
+                            addErr('PO_ID_INVALID', ppath + '.po_item_internalid must be a positive number.', { value: p.po_item_internalid });
+                        }
+                        const pq = toNum(p.po_item_quantity);
+                        if (!(pq >= 0)) {
+                            addErr('PO_QTY_INVALID', ppath + '.po_item_quantity must be >= 0.', { value: p.po_item_quantity });
+                        }
+                    });
+                }
+            }
+
         });
 
         // Reconciliation checks (container-level totals)
@@ -2074,6 +2235,36 @@ function showStep2(){
                 });
             }
         });
+
+        // 1b) Total PO qty in summary should match total allocated PO qty across all workorders (by PO item).
+        const expectedByPo = {};
+        summaryPurchase.forEach((p) => {
+            const id = p && p.id ? String(p.id) : '';
+            if (!id) return;
+            expectedByPo[id] = round6(toNum(expectedByPo[id]) + toNum(p.qty));
+        });
+
+        const actualByPo = {};
+        workorders.forEach((wo) => {
+            (Array.isArray(wo.purchase) ? wo.purchase : []).forEach((p) => {
+                const id = p && p.po_item_internalid ? String(p.po_item_internalid) : '';
+                if (!id) return;
+                actualByPo[id] = round6(toNum(actualByPo[id]) + toNum(p.po_item_quantity));
+            });
+        });
+
+        Object.keys(expectedByPo).forEach((id) => {
+            const exp = round6(toNum(expectedByPo[id]));
+            const act = round6(toNum(actualByPo[id]));
+            if (Math.abs(exp - act) > 0.000001) {
+                addErr('PO_TOTAL_MISMATCH', 'Allocated total for PO item ' + id + ' does not match summary PO qty.', {
+                    po_item_internalid: Number(id),
+                    expected_qty: exp,
+                    actual_allocated_qty: act
+                });
+            }
+        });
+
 
         // 2) Total output qty should match summary outputs (by output item).
         const expectedByOutput = {};
@@ -2143,8 +2334,9 @@ function showStep2(){
             try {
                 const outputs = Array.isArray(summary.outputs) ? summary.outputs : [];
                 const inputs = Array.isArray(summary.inputs) ? summary.inputs : [];
+                const purchases = Array.isArray(summary.purchase) ? summary.purchase : (Array.isArray(summary.purchaseOrder) ? summary.purchaseOrder : []);
 
-                if (outputs.length || inputs.length) {
+                if (outputs.length || inputs.length || purchases.length) {
                     const subsidiary = rec.getValue({ fieldId: 'custrecord_cos_rep_subsidiary' }) || '';
                     const location = rec.getValue({ fieldId: 'custrecord_cos_rep_location' }) || '';
                     const species = rec.getValue({ fieldId: 'custrecord_cos_rep_species' }) || '';
@@ -2153,6 +2345,7 @@ function showStep2(){
                     const itemIds = [];
                     outputs.forEach(o => { if (o && o.id) itemIds.push(String(o.id)); });
                     inputs.forEach(i => { if (i && i.id) itemIds.push(String(i.id)); });
+                    purchases.forEach(p => { if (p && p.id) itemIds.push(String(p.id)); });
 
                     const convMap = fetchConversionMap(itemIds);
 
@@ -2226,6 +2419,27 @@ function showStep2(){
                         });
                     });
 
+                    // Build purchase allocations map: output -> purchaseItem -> allocatedQty
+                    const purchaseAllocations = {}; // { [outId]: { [purchaseItemId]: qty } }
+                    outReq.forEach(o => { purchaseAllocations[o.outId] = {}; });
+
+                    purchases.forEach((p) => {
+                        const purchaseId = p && p.id ? String(p.id) : '';
+                        if (!purchaseId) return;
+                        const purchaseQty = toNum(p.qty);
+                        const outIds = outReq.map(o => o.outId);
+                        if (!outIds.length) return;
+
+                        let running = 0;
+                        outIds.forEach((outId, idx) => {
+                            const isLast = (idx === outIds.length - 1);
+                            let alloc = isLast ? (purchaseQty - running) : round6(purchaseQty * (shares[outId] || 0));
+                            alloc = round6(alloc);
+                            running = round6(running + alloc);
+                            purchaseAllocations[outId][purchaseId] = alloc;
+                        });
+                    });
+
                     // Attach conversions + computed fields onto summary arrays (non-breaking additive fields)
                     const outputsEnriched = outputs.map((o) => {
                         const id = o && o.id ? String(o.id) : '';
@@ -2254,6 +2468,18 @@ function showStep2(){
                         });
                     });
 
+                    const purchasesEnriched = purchases.map((p) => {
+                        const id = p && p.id ? String(p.id) : '';
+                        const qty = toNum(p && p.qty);
+                        const conv = convMap[id] || 0;
+                        return Object.assign({}, p, {
+                            id,
+                            qty: (p && p.qty != null ? p.qty : ''),
+                            conversion: conv,
+                            qty_num: round6(qty)
+                        });
+                    });
+
                     const enriched = Object.assign({}, summary, {
                         meta: Object.assign({}, (summary.meta || {}), {
                             speciesId: String(species || ''),
@@ -2263,11 +2489,13 @@ function showStep2(){
                         }),
                         outputs: outputsEnriched,
                         inputs: inputsEnriched,
+                        purchase: purchasesEnriched,
                         distribution: {
                             method: 'prorated',
                             totalRequirement: round6(totalReq),
                             shares: shares,
-                            allocations: allocations
+                            allocations: allocations,
+                            purchaseAllocations: purchaseAllocations
                         }
                     });
 
@@ -2371,7 +2599,11 @@ function showStep2(){
                 // Required scheduling fields
                 try { woRec.setValue({ fieldId: 'enddate', value: new Date() }); } catch (_e) {}
 
-                // Work Order item field is commonly 'assemblyitem' (preferred); some accounts expose 'item'.
+
+
+                // Work Order status
+                try { woRec.setValue({ fieldId: 'orderstatus', value: 'B' }); } catch (_e) {}
+// Work Order item field is commonly 'assemblyitem' (preferred); some accounts expose 'item'.
                 try {
                     woRec.setValue({ fieldId: 'assemblyitem', value: Number(woObj.output_item_internalid) });
                 } catch (_e) {
@@ -2408,7 +2640,30 @@ function showStep2(){
                 */
 
                 // Components
-                const inputs = (woObj && woObj.inputs) ? woObj.inputs : [];
+                // Inventory-driven inputs stay in woObj.inputs; Purchase Order lines stay in woObj.purchase.
+                // PO lines MUST be added as unique component lines (aggregated by item).
+                const invInputs = (woObj && Array.isArray(woObj.inputs)) ? woObj.inputs : [];
+
+                // Aggregate PO lines by item (unique component per PO item)
+                const poLinesRaw = (woObj && Array.isArray(woObj.purchase)) ? woObj.purchase : [];
+                const poInputsMap = {};
+                poLinesRaw.forEach((p) => {
+                    if (!p) return;
+                    const itemIdStr = (p.po_item_internalid != null) ? String(p.po_item_internalid) : '';
+                    if (!itemIdStr) return;
+
+                    const qty = toNum(p.po_item_quantity);
+                    if (!(qty > 0)) return;
+
+                    if (!poInputsMap[itemIdStr]) {
+                        poInputsMap[itemIdStr] = {
+                            item_internalid: Number(p.po_item_internalid),
+                            quantity: 0
+                        };
+                    }
+                    poInputsMap[itemIdStr].quantity = round6(toNum(poInputsMap[itemIdStr].quantity) + qty);
+                });
+                const poInputs = Object.keys(poInputsMap).map((k) => poInputsMap[k]);
 
                 // Build an index of existing component lines (BOM/revision suggested) by item id
                 const existingLineCount2 = (() => {
@@ -2605,7 +2860,7 @@ function showStep2(){
                     }
                 }
 
-                inputs.forEach((inp) => {
+                invInputs.forEach((inp) => {
                     if (!inp || !inp.input_item_internalid) return;
                     const qty = Number(inp.input_item_quantity || 0);
                     if (qty <= 0) return;
@@ -2657,6 +2912,40 @@ function showStep2(){
                         } catch (_e) {}
                     }
                 });
+
+
+                // Purchase Order components (unique, no lots)
+                poInputs.forEach((inp) => {
+                    if (!inp || !inp.item_internalid) return;
+                    const qty = toNum(inp.quantity);
+                    if (!(qty > 0)) return;
+
+                    try {
+                        woRec.selectNewLine({ sublistId: 'item' });
+                        woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'item', value: Number(inp.item_internalid) });
+
+                        // Blank out allocation strategies (value 2 / blank)
+                        try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'defaultorderallocationstrategy', value: "" }); } catch (_e) {}
+                        try { woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'orderallocationstrategy', value: "" }); } catch (_e) {}
+
+                        try {
+                            log.debug({ title: 'COS Repack: setting PO component qty', details: JSON.stringify({ ...contextInfo, itemId: String(inp.item_internalid), qty }) });
+                        } catch (_e) {}
+                        woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
+
+                        // NOTE: PO components do NOT assign inventory detail here.
+                        woRec.commitLine({ sublistId: 'item' });
+                    } catch (poLineErr) {
+                        try {
+                            log.error({
+                                title: 'COS Repack: PO component line add failed',
+                                details: JSON.stringify({ ...contextInfo, itemId: String(inp.item_internalid), qty, error: String(poLineErr) })
+                            });
+                        } catch (_e) {}
+                    }
+                });
+
+
 
                 const woId = woRec.save({ enableSourcing: true, ignoreMandatoryFields: false });
                 results.push({ index: idx, workorderId: woId, output_item_internalid: woObj.output_item_internalid, output_item_quantity: woObj.output_item_quantity });
