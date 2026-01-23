@@ -5,6 +5,11 @@
 
 define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidget, url, search, log, record) => {
 
+    // Suitelet used by the "Print Repack" button (VIEW mode)
+    // NOTE: replace these IDs if your Script/Deployment IDs differ in your account.
+    const PRINT_REPACK_SL_SCRIPTID = 'customscript_cos_sl_repack_print';
+    const PRINT_REPACK_SL_DEPLOYID = 'customdeploy_cos_sl_repack_print';
+
     const beforeLoad = (scriptContext) => {
         const { form, type } = scriptContext;
 
@@ -26,6 +31,41 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         // In VIEW mode the user won't interact; we just rebuild the Summary HTML from saved payload fields.
         if (type === scriptContext.UserEventType.VIEW) {
             const rec = scriptContext.newRecord;
+
+            // Add "Print Repack" button (VIEW mode only)
+            try {
+                const printUrl = url.resolveScript({
+                    scriptId: PRINT_REPACK_SL_SCRIPTID,
+                    deploymentId: PRINT_REPACK_SL_DEPLOYID,
+                    params: {
+                        repackid: rec.id
+                    }
+                });
+
+                form.addButton({
+                    id: 'custpage_cos_print_repack',
+                    label: 'Print Repack',
+                    functionName: 'printCosRepackPdf'
+                });
+
+                const inline = form.addField({
+                    id: 'custpage_cos_print_repack_inline',
+                    type: serverWidget.FieldType.INLINEHTML,
+                    label: ' '
+                });
+
+                inline.defaultValue = '<script type="text/javascript">' +
+                    'function printCosRepackPdf(){' +
+                    '  try {' +
+                    '    var u = ' + JSON.stringify(printUrl) + ';' +
+                    '    window.open(u, "_blank", "width=1100,height=800,scrollbars=yes,resizable=yes");' +
+                    '  } catch (e) { console && console.log && console.log("Print Repack failed", e); }' +
+                    '}' +
+                    '</script>';
+            } catch (e) {
+                log.error({ title: 'Print Repack button failed', details: e });
+            }
+
 
             let summaryStr = '';
             let lotsStr = '';
