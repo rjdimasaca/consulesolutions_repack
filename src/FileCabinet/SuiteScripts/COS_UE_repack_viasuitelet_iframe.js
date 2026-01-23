@@ -1955,6 +1955,12 @@ function showStep2(){
         return Math.round(x * 1e6) / 1e6;
     }
 
+    function round9(n) {
+        const x = Number(n);
+        if (!isFinite(x)) return 0;
+        return Math.round(x * 1e9) / 1e9;
+    }
+
     function fetchConversionMap(itemIds) {
         const map = {};
         if (!itemIds || !itemIds.length) return map;
@@ -2073,25 +2079,29 @@ function showStep2(){
             const outIds = outReq.map(o => o.outId);
             if (!outIds.length) return;
 
-            const conv = convMap[String(srcId)] || 0;
-            const qtyNum = toNum(srcQty);
+            const totalQty = toNum(srcQty);
+            if (!(totalQty > 0)) return;
 
-            // Weight domain for fair distribution: weight = qty * conv (fallback to qty if conv missing)
-            const totalWeight = (conv > 0) ? (qtyNum * conv) : qtyNum;
-            if (!(totalWeight > 0)) return;
-
-            let runningWeight = 0;
+            // Allocate source QTY across outputs by output shares.
+            // Use higher precision during allocation to reduce 0-qty rounding artifacts that can drop component lines.
+            // Final qty is still stored as a number (NetSuite will apply its own precision rules based on the item's unit type).
+            let runningQty = 0;
 
             outIds.forEach((outId, idx) => {
                 const isLast = (idx === outIds.length - 1);
 
-                let allocWeight = isLast ? (totalWeight - runningWeight) : round6(totalWeight * (shares[outId] || 0));
-                allocWeight = round6(allocWeight);
-                runningWeight = round6(runningWeight + allocWeight);
+                let allocQty = 0;
 
-                // Convert allocated weight back into qty for this source item
-                let allocQty = (conv > 0) ? (allocWeight / conv) : allocWeight;
-                allocQty = round6(allocQty);
+                if (isLast) {
+                    allocQty = round9(totalQty - runningQty);
+                } else {
+                    allocQty = round9(totalQty * (shares[outId] || 0));
+                }
+
+                allocQty = round9(allocQty);
+                if (allocQty <= 0) return;
+
+                runningQty = round9(runningQty + allocQty);
 
                 if (isPurchase) {
                     allocationsPoByOut[outId].push({
@@ -2102,7 +2112,7 @@ function showStep2(){
                     allocationsInvByOut[outId].push({
                         input_item_internalid: Number(srcId),
                         input_item_quantity: allocQty,
-                        input_item_lots: prorateLotsForAllocation((Array.isArray(srcLotsArr) ? srcLotsArr : []), allocQty, qtyNum)
+                        input_item_lots: prorateLotsForAllocation((Array.isArray(srcLotsArr) ? srcLotsArr : []), allocQty, totalQty)
                     });
                 }
             });
@@ -2243,6 +2253,19 @@ function showStep2(){
                     });
                 }
             }
+
+
+            // Guard: at least one positive component (inventory input or PO line) must exist per WO
+            // Otherwise this WO will be created with no components because component-creation skips qty<=0 lines.
+            try {
+                const posInv = (Array.isArray(wo.inputs) ? wo.inputs : []).some(x => toNum(x && x.input_item_quantity) > 0);
+                const posPo  = (Array.isArray(wo.purchase) ? wo.purchase : []).some(x => toNum(x && x.po_item_quantity) > 0);
+                if (!posInv && !posPo) {
+                    addErr('WO_NO_POSITIVE_COMPONENTS', path + ' has no positive component quantities (inputs/purchase).', {
+                        output_item_internalid: wo.output_item_internalid
+                    });
+                }
+            } catch (_e) {}
 
         });
 
