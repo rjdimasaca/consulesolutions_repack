@@ -10,6 +10,17 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     const PRINT_REPACK_SL_SCRIPTID = 'customscript_cos_sl_repack_print';
     const PRINT_REPACK_SL_DEPLOYID = 'customdeploy_cos_sl_repack_print';
 
+
+    // Suitelet used by the "Create Work Orders" button (VIEW mode)
+    // NOTE: replace these IDs if your Script/Deployment IDs differ in your account.
+    const CREATE_WO_SL_SCRIPTID = 'customscript_cos_sl_repack_actions';
+    const CREATE_WO_SL_DEPLOYID = 'customdeploy_cos_sl_repack_actions';
+
+    // Repack status field + values
+    const REPACK_STATUS_FIELDID = 'custrecord_cos_rep_status';
+    const REPACK_STATUS_DRAFT = '1';
+    const REPACK_STATUS_WO_CREATED = '2';
+
     const beforeLoad = (scriptContext) => {
         const { form, type } = scriptContext;
 
@@ -62,6 +73,50 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
                     '  } catch (e) { console && console.log && console.log("Print Repack failed", e); }' +
                     '}' +
                     '</script>';
+
+                // Add "Create Work Orders" button (VIEW mode only) - only when status is Draft (1)
+                try {
+                    let repStatus = '';
+                    try { repStatus = rec.getValue({ fieldId: REPACK_STATUS_FIELDID }); } catch (_e) {}
+                    const repStatusStr = (repStatus === null || repStatus === undefined) ? '' : String(repStatus);
+
+                    log.debug("repStatusStr", repStatusStr);
+                    if (repStatusStr === '' || repStatusStr === REPACK_STATUS_DRAFT) {
+                        const createWoUrl = url.resolveScript({
+                            scriptId: CREATE_WO_SL_SCRIPTID,
+                            deploymentId: CREATE_WO_SL_DEPLOYID,
+                            params: {
+                                repackid: rec.id,
+                                rectype: rec.type,
+                                action: 'createWO'
+                            }
+                        });
+
+                        form.addButton({
+                            id: 'custpage_cos_create_workorders',
+                            label: 'Create Work Orders',
+                            functionName: 'createCosRepackWorkOrders'
+                        });
+
+                        const inline2 = form.addField({
+                            id: 'custpage_cos_create_workorders_inline',
+                            type: serverWidget.FieldType.INLINEHTML,
+                            label: ' '
+                        });
+
+                        inline2.defaultValue = '<script type="text/javascript">' +
+                            'function createCosRepackWorkOrders(){' +
+                            '  try {' +
+                            '    var u = ' + JSON.stringify(createWoUrl) + ';' +
+                            '    window.open(u, "_blank", "width=1100,height=800,scrollbars=yes,resizable=yes");' +
+                            '  } catch (e) { console && console.log && console.log("Create Work Orders failed", e); }' +
+                            '}' +
+                            '</script>';
+                    }
+                } catch (e) {
+                    try { log.error({ title: 'Create Work Orders button failed', details: e }); } catch (_e) {}
+                }
+
             } catch (e) {
                 log.error({ title: 'Print Repack button failed', details: e });
             }
@@ -401,7 +456,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         }
 
 // Keep client-side UX: item list updates on fieldChanged/pageInit
-        form.clientScriptModulePath = './COS_CS_repack_viasuitelet.js';
+        form.clientScriptModulePath = './COS_CS_repack.js';
 
         // UI-only payload fields
         const outputsPayload = form.addField({
@@ -2626,17 +2681,15 @@ function showStep2(){
                 details: JSON.stringify(payload)
             });
 
-            // Create Work Orders
-            const createdWorkOrders = createWorkOrdersFromPayload(payload, repackMarkWip);
+            // NOTE: Work Order creation has been moved to a dedicated button click (Suitelet) in VIEW mode.
+// This afterSubmit now only logs the validated payload for debugging, but does NOT create transactions.
             try {
-                log.audit({
-                    title: 'COS Repack: workorders created',
-                    details: JSON.stringify(createdWorkOrders)
-                });
+                log.audit({ title: 'COS Repack: workorders payload (debug)', details: JSON.stringify(payload) });
             } catch (_e) {}
 
-            // Per user preference: log the final output marker
-            try { log.debug({ title: 'COS Repack: afterSubmit complete', details: JSON.stringify({ workorders: (payload.workorders || []).length, errors: (validationErrors || []).length }) }); } catch (_e) {}
+            try {
+                log.debug({ title: 'COS Repack: afterSubmit complete (no WO creation)', details: JSON.stringify({ workorders: (payload.workorders || []).length, errors: (validationErrors || []).length }) });
+            } catch (_e) {}
         } catch (e) {
             try {
                 log.error({ title: 'COS Repack: afterSubmit failed', details: e });
