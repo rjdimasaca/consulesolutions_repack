@@ -143,107 +143,114 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
     }
 
     function cosOpenCreateWoModal() {
+        // Prefer iframe modal (UE should set hidden field `custpage_cos_createwo_url`)
+        // Fallback: if an inline handler exists, call it.
         try {
-            // Prefer URL injected by User Event (VIEW mode)
-            let u = '';
-            try {
-                const el = document.getElementById('custpage_cos_createwo_url');
-                if (el && el.value) u = String(el.value);
-            } catch (ignore) {}
+            const rec = currentRecord.get();
+            const urlVal = rec.getValue({ fieldId: 'custpage_cos_createwo_url' });
+            const suiteletUrl = (urlVal && String(urlVal).trim()) ? String(urlVal).trim() : '';
 
-            // fallback (older inline handler)
-            if (!u && window.cosOpenCreateWoModal_inline) {
-                window.cosOpenCreateWoModal_inline();
-                return;
-            }
+            if (suiteletUrl) {
+                const OVERLAY_ID = 'cos_createwo_overlay';
+                const MODAL_ID = 'cos_createwo_modal';
+                const IFRAME_ID = 'cos_createwo_iframe';
 
-            if (!u) {
-                alert('Create WO URL is not available.');
-                return;
-            }
+                const closeModal = (opts) => {
+                    const o = opts || {};
+                    try {
+                        const overlay = document.getElementById(OVERLAY_ID);
+                        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                        const modal = document.getElementById(MODAL_ID);
+                        if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
+                    } catch (ignore) {}
+                    if (o.refresh) {
+                        try { window.location.reload(); } catch (ignore) {}
+                    }
+                };
 
-            // Build modal DOM once
-            let overlay = document.getElementById('cos_createwo_overlay');
-            let modal   = document.getElementById('cos_createwo_modal');
-            let iframe  = document.getElementById('cos_createwo_iframe');
-            let closeBtn= document.getElementById('cos_createwo_close');
+                // inject styles once
+                if (!document.getElementById('cos_createwo_modal_style')) {
+                    const style = document.createElement('style');
+                    style.id = 'cos_createwo_modal_style';
+                    style.type = 'text/css';
+                    style.appendChild(document.createTextNode(
+                        '#' + OVERLAY_ID + '{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;}' +
+                        '#' + MODAL_ID + '{position:fixed;inset:4%;background:#fff;border-radius:10px;z-index:100001;box-shadow:0 10px 30px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column;}' +
+                        '#' + MODAL_ID + ' .cos_hdr{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #e5e5e5;}' +
+                        '#' + MODAL_ID + ' .cos_title{font-weight:600;font-size:14px;flex:1;}' +
+                        '#' + MODAL_ID + ' .cos_btn{cursor:pointer;border:1px solid #ccc;border-radius:8px;padding:6px 10px;background:#f7f7f7;}' +
+                        '#' + MODAL_ID + ' .cos_btn:hover{background:#efefef;}' +
+                        '#' + IFRAME_ID + '{width:100%;height:100%;border:0;flex:1;}'
+                    ));
+                    document.head.appendChild(style);
+                }
 
-            if (!overlay || !modal || !iframe) {
-                overlay = document.createElement('div');
-                overlay.id = 'cos_createwo_overlay';
-                overlay.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:100000;display:none;';
+                // wire postMessage listener once
+                if (!window.__COS_CREATEWO_MSG_WIRED__) {
+                    window.__COS_CREATEWO_MSG_WIRED__ = true;
+                    window.addEventListener('message', function (evt) {
+                        try {
+                            const msg = evt && evt.data;
+                            if (!msg || typeof msg !== 'object') return;
+                            if (msg.type === 'COS_REPACK_CREATEWO_CLOSE') closeModal({ refresh: false });
+                            if (msg.type === 'COS_REPACK_CREATEWO_DONE') closeModal({ refresh: true });
+                        } catch (ignore) {}
+                    });
+                }
 
-                modal = document.createElement('div');
-                modal.id = 'cos_createwo_modal';
-                modal.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:92vw;max-width:1200px;height:85vh;background:#fff;border-radius:10px;overflow:hidden;z-index:100001;display:none;box-shadow:0 10px 40px rgba(0,0,0,0.35);';
+                // close any existing modal then open
+                closeModal({ refresh: false });
+
+                const overlay = document.createElement('div');
+                overlay.id = OVERLAY_ID;
+                overlay.onclick = function () { closeModal({ refresh: false }); };
+                document.body.appendChild(overlay);
+
+                const modal = document.createElement('div');
+                modal.id = MODAL_ID;
 
                 const hdr = document.createElement('div');
-                hdr.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#2f3f53;color:#fff;font-family:Arial,Helvetica,sans-serif;';
-                const title = document.createElement('div');
-                title.textContent = 'Create Work Orders';
-                title.style.cssText = 'font-weight:bold;font-size:14px;';
-                closeBtn = document.createElement('button');
-                closeBtn.id = 'cos_createwo_close';
-                closeBtn.type = 'button';
-                closeBtn.textContent = '✕';
-                closeBtn.style.cssText = 'cursor:pointer;border:0;background:transparent;color:#fff;font-size:18px;line-height:18px;padding:2px 6px;';
-                hdr.appendChild(title);
-                hdr.appendChild(closeBtn);
+                hdr.className = 'cos_hdr';
 
-                iframe = document.createElement('iframe');
-                iframe.id = 'cos_createwo_iframe';
-                iframe.style.cssText = 'width:100%;height:calc(85vh - 44px);border:0;display:block;';
-                iframe.setAttribute('frameborder', '0');
+                const title = document.createElement('div');
+                title.className = 'cos_title';
+                title.textContent = 'Create Work Orders';
+
+                const btnClose = document.createElement('button');
+                btnClose.type = 'button';
+                btnClose.className = 'cos_btn';
+                btnClose.textContent = 'Close';
+                btnClose.onclick = function () { closeModal({ refresh: false }); };
+
+                hdr.appendChild(title);
+                hdr.appendChild(btnClose);
+
+                const iframe = document.createElement('iframe');
+                iframe.id = IFRAME_ID;
+                iframe.src = suiteletUrl;
 
                 modal.appendChild(hdr);
                 modal.appendChild(iframe);
 
-                document.body.appendChild(overlay);
                 document.body.appendChild(modal);
 
-                const close = () => {
-                    try { iframe.src = 'about:blank'; } catch (ignore) {}
-                    overlay.style.display = 'none';
-                    modal.style.display = 'none';
-                    try { document.body.style.overflow = ''; } catch (ignore) {}
-                };
-
-                overlay.addEventListener('click', close);
-                closeBtn.addEventListener('click', close);
-
-                // Listen for Suitelet messages to close/refresh
-                if (!window.__COS_CREATEWO_PM_BOUND__) {
-                    window.__COS_CREATEWO_PM_BOUND__ = true;
-                    window.addEventListener('message', function(ev){
-                        try {
-                            const d = ev && ev.data ? ev.data : null;
-                            if (!d || typeof d !== 'object') return;
-
-                            if (d.type === 'COS_REPACK_CREATEWO_CLOSE') {
-                                close();
-                            }
-                            if (d.type === 'COS_REPACK_CREATEWO_DONE') {
-                                close();
-                                try { window.location.reload(); } catch (ignore) {}
-                            }
-                        } catch (ignore) {}
-                    });
-                }
+                try { console.log('COS_CS cosOpenCreateWoModal iframe', suiteletUrl); } catch (ignore) {}
+                return;
             }
-
-            // Open modal
-            iframe.src = u;
-            overlay.style.display = 'block';
-            modal.style.display = 'block';
-            try { document.body.style.overflow = 'hidden'; } catch (ignore) {}
-
-            try { console.log('cosOpenCreateWoModal opened', u); } catch (ignore) {}
         } catch (e) {
-            try { console.error('cosOpenCreateWoModal failed', e); } catch (ignore) {}
-            alert('Unable to open Create Work Orders modal. See console for details.');
+            try { console.error('COS_CS cosOpenCreateWoModal error', e); } catch (ignore) {}
         }
-    }
 
+        // fallback to old inline handler if present
+        try {
+            if (window.cosOpenCreateWoModal_inline) {
+                window.cosOpenCreateWoModal_inline();
+                return;
+            }
+        } catch (ignore) {}
+
+        alert('Create WO URL is not available.');
+    }
     function fieldChanged(context) {
         if (!context) return;
         if (context.fieldId === FIELD_SPECIES || context.fieldId === FIELD_LOCATION) {

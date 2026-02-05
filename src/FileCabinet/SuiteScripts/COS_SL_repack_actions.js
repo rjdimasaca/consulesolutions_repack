@@ -28,7 +28,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
     }
 
     function renderResultPage(context, title, bodyHtml) {
-        const form = serverWidget.createForm({ title });
+        const form = serverWidget.createForm({ title, hideNavBar : true });
         const fld = form.addField({
             id: 'custpage_cos_result_html',
             type: serverWidget.FieldType.INLINEHTML,

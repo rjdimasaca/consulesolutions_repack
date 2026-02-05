@@ -38,7 +38,10 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         });
 
 
-        // VIEW MODE: Read-only Repack Summary (rendered to match the interactive Step 3 UI)
+        // Client Script (also needed in VIEW mode for the Create Work Orders iframe modal)
+        form.clientScriptModulePath = './COS_CS_repack.js';
+
+// VIEW MODE: Read-only Repack Summary (rendered to match the interactive Step 3 UI)
         // In VIEW mode the user won't interact; we just rebuild the Summary HTML from saved payload fields.
         if (type === scriptContext.UserEventType.VIEW) {
             const rec = scriptContext.newRecord;
@@ -92,26 +95,20 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
                             }
                         });
 
+
+                        // Pass the resolved Suitelet URL to the client script (VIEW mode cannot call url.resolveScript client-side reliably)
+                        const woUrlFld = form.addField({
+                            id: 'custpage_cos_createwo_url',
+                            type: serverWidget.FieldType.LONGTEXT,
+                            label: 'Create WO URL'
+                        });
+                        woUrlFld.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+                        woUrlFld.defaultValue = String(createWoUrl || '');
                         form.addButton({
                             id: 'custpage_cos_create_workorders',
                             label: 'Create Work Orders',
-                            functionName: 'createCosRepackWorkOrders'
+                            functionName: 'cosOpenCreateWoModal'
                         });
-
-                        const inline2 = form.addField({
-                            id: 'custpage_cos_create_workorders_inline',
-                            type: serverWidget.FieldType.INLINEHTML,
-                            label: ' '
-                        });
-
-                        inline2.defaultValue = '<script type="text/javascript">' +
-                            'function createCosRepackWorkOrders(){' +
-                            '  try {' +
-                            '    var u = ' + JSON.stringify(createWoUrl) + ';' +
-                            '    window.open(u, "_blank", "width=1100,height=800,scrollbars=yes,resizable=yes");' +
-                            '  } catch (e) { console && console.log && console.log("Create Work Orders failed", e); }' +
-                            '}' +
-                            '</script>';
                     }
                 } catch (e) {
                     try { log.error({ title: 'Create Work Orders button failed', details: e }); } catch (_e) {}
@@ -2431,26 +2428,18 @@ function showStep2(){
 
             // Only relevant for create/edit/xedit (ignore delete)
             if (type === context.UserEventType.DELETE) return;
-            // Read UI payloads (custpage fields) if present on this execution context.
-            // IMPORTANT: submitFields() calls (e.g., Create WO) can trigger this UE without those custpage fields,
-            // and we MUST NOT wipe persisted payloads in that case.
-            let rawSummary;
-            let rawLots;
-            try { rawSummary = rec.getValue({ fieldId: 'custpage_cos_summary_payload' }); } catch (_e) { rawSummary = undefined; }
-            try { rawLots = rec.getValue({ fieldId: 'custpage_cos_input_lots_payload' }); } catch (_e) { rawLots = undefined; }
 
-            // Existing persisted payloads (truth source when UI fields are missing/blank)
-            let existingSummary = '';
-            let existingLots = '';
-            try { existingSummary = String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''); } catch (_e) {}
-            try { existingLots = String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || ''); } catch (_e) {}
+            const rawSummary = rec.getValue({ fieldId: 'custpage_cos_summary_payload' });
+            const rawLots = rec.getValue({ fieldId: 'custpage_cos_input_lots_payload' });
 
-            const uiSummaryStr = (rawSummary !== null && rawSummary !== undefined) ? String(rawSummary || '') : '';
-            const uiLotsStr = (rawLots !== null && rawLots !== undefined) ? String(rawLots || '') : '';
+            // If custpage fields are unavailable (csv/web services), fall back to existing stored payloads
+            const summaryStr = (rawSummary !== null && rawSummary !== undefined)
+                ? String(rawSummary || '')
+                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '');
 
-            // Only take UI values if they are non-empty after trim; otherwise keep existing
-            const summaryStr = (uiSummaryStr && uiSummaryStr.trim()) ? uiSummaryStr : existingSummary;
-            const lotsStr = (uiLotsStr && uiLotsStr.trim()) ? uiLotsStr : existingLots;
+            const lotsStr = (rawLots !== null && rawLots !== undefined)
+                ? String(rawLots || '')
+                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '');
 
             const summary = safeParseJson(summaryStr) || {};
             const lotsMap = safeParseJson(lotsStr) || {};
@@ -2631,27 +2620,14 @@ function showStep2(){
                 // If anything goes wrong, keep the original summary string (do not block save)
                 finalSummaryStr = summaryStr;
             }
-            // Persist into real record fields
-            // Guardrails:
-            // - Never overwrite with blank strings (common when UE runs from submitFields / background updates).
-            // - Only persist when we actually have meaningful JSON snapshots.
-            try {
-                if (finalSummaryStr !== null && finalSummaryStr !== undefined) {
-                    const s = String(finalSummaryStr || '');
-                    if (s.trim()) {
-                        rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: s });
-                    }
-                }
-            } catch (_e) {}
 
-            try {
-                if (lotsStr !== null && lotsStr !== undefined) {
-                    const l = String(lotsStr || '');
-                    if (l.trim()) {
-                        rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: l });
-                    }
-                }
-            } catch (_e) {}
+            // Persist into real record fields
+            if (finalSummaryStr !== null && finalSummaryStr !== undefined) {
+                try { rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: finalSummaryStr }); } catch (_e) {}
+            }
+            if (lotsStr !== null && lotsStr !== undefined) {
+                try { rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: lotsStr }); } catch (_e) {}
+            }
 
             // Helpful debug marker (log final output)
             try {
