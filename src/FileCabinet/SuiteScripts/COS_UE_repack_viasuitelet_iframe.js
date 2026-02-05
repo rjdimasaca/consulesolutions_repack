@@ -531,7 +531,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
 <!-- STEP 1: OUTPUTS -->
 <div id="cos_out_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
-  <div style="background: #b42b20;color:#fff;padding:10px 12px;">
+  <div style="background: #00AFEF;color:#fff;padding:10px 12px;">
     <div style="font-weight:bold;">Step 1: Select Outputs</div>
     <div style="font-size:12px;opacity:0.9;">Choose output items and quantities</div>
   </div>
@@ -570,7 +570,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
     <!-- INPUTS -->
     <div id="cos_in_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
-      <div style="background:#ffc400;color:#fff;padding:10px 12px;">
+      <div style="background:#00AFEF;color:#fff;padding:10px 12px;">
         <div style="font-weight:bold;">Step 2: Select Inputs</div>
         <div style="font-size:12px;opacity:0.9;">Choose which items to consume as inputs</div>
       </div>
@@ -599,7 +599,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
     <!-- PURCHASE ORDERS -->
     <div id="cos_po_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
-      <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
+      <div style="background:#00AFEF;color:#fff;padding:10px 12px;">
         <div style="font-weight:bold;">Purchase Order</div>
         <div style="font-size:12px;opacity:0.9;">If inventory inputs are insufficient, order the remaining requirement</div>
       </div>
@@ -636,7 +636,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 
 <!-- STEP 3: SUMMARY -->
 <div id="cos_summary_section" style="display:none;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-bottom:12px;">
-  <div style="background:#01a801;color:#fff;padding:10px 12px;">
+  <div style="background:#00AFEF;color:#fff;padding:10px 12px;">
     <div style="font-weight:bold;">Repack Summary</div>
     <div style="font-size:12px;opacity:0.9;">Review outputs and inputs before proceeding</div>
   </div>
