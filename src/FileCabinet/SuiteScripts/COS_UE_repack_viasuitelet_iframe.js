@@ -530,7 +530,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 </div>
 
 <!-- STEP 1: OUTPUTS -->
-<div id="cos_out_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
+<div id="cos_out_section" class="cos_hide_conversion" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
   <div style="background: #00AFEF;color:#fff;padding:10px 12px;">
     <div style="font-weight:bold;">Step 1: Select Outputs</div>
     <div style="font-size:12px;opacity:0.9;">Choose output items and quantities</div>
@@ -546,7 +546,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     <div>Item</div>
     <div style="text-align:right;">Qty</div>
     <div style="text-align:right;">Weight</div>
-    <div style="text-align:right;">Conversion</div>
+    <div class="cos_col_conversion" style="text-align:right;">Conversion</div>
     <div style="text-align:right;">Available</div>
     <div style="text-align:right;">On Hand</div>
     <div style="text-align:right;">Committed</div>
@@ -569,7 +569,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   <div style="display:flex;flex-direction:column;gap:12px;align-items:stretch;">
 
     <!-- INPUTS -->
-    <div id="cos_in_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
+    <div id="cos_in_section" class="cos_hide_conversion" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
       <div style="background:#00AFEF;color:#fff;padding:10px 12px;">
         <div style="font-weight:bold;">Step 2: Select Inputs</div>
         <div style="font-size:12px;opacity:0.9;">Choose which items to consume as inputs</div>
@@ -585,7 +585,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         <div>Item</div>
         <div style="text-align:right;">Qty</div>
         <div style="text-align:right;">Weight</div>
-        <div style="text-align:right;">Conversion</div>
+        <div class="cos_col_conversion" style="text-align:right;">Conversion</div>
         <div style="text-align:right;">Available</div>
         <div style="text-align:right;">On Hand</div>
         <div style="text-align:right;">Committed</div>
@@ -598,7 +598,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     </div>
 
     <!-- PURCHASE ORDERS -->
-    <div id="cos_po_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
+    <div id="cos_po_section" class="cos_hide_conversion" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
       <div style="background:#00AFEF;color:#fff;padding:10px 12px;">
         <div style="font-weight:bold;">Purchase Order</div>
         <div style="font-size:12px;opacity:0.9;">If inventory inputs are insufficient, order the remaining requirement</div>
@@ -615,7 +615,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         <div>Item</div>
         <div style="text-align:right;">Order Qty</div>
         <div style="text-align:right;">Order Weight</div>
-        <div style="text-align:right;">Conversion</div>
+        <div class="cos_col_conversion" style="text-align:right;">Conversion</div>
         <div style="text-align:right;">Suggested Qty</div>
         <div style="text-align:right;">Suggested Weight</div>
       </div>
@@ -656,6 +656,33 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 </div>
 
 <style>
+/* Hide Conversion columns (Step 1, Step 2, PO) - keep DOM intact */
+.cos_hide_conversion .cos_col_conversion { display:none !important; }
+
+/* Step 1: Outputs (Conversion is 5th column) */
+#cos_out_section.cos_hide_conversion .cos_tbl_hdr > div:nth-child(5),
+#cos_out_section.cos_hide_conversion .cos_tbl_row > div:nth-child(5) { display:none !important; }
+#cos_out_section.cos_hide_conversion .cos_tbl_hdr,
+#cos_out_section.cos_hide_conversion .cos_tbl_row{
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px !important;
+}
+
+/* Step 2: Inputs (Conversion is 5th column) */
+#cos_in_section.cos_hide_conversion .cos_tbl_hdr > div:nth-child(5),
+#cos_in_section.cos_hide_conversion .cos_tbl_row_input > div:nth-child(5) { display:none !important; }
+#cos_in_section.cos_hide_conversion .cos_tbl_hdr,
+#cos_in_section.cos_hide_conversion .cos_tbl_row_input{
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 120px !important;
+}
+
+/* PO Section (Conversion is 5th column) */
+#cos_po_section.cos_hide_conversion .cos_tbl_hdr > div:nth-child(5),
+#cos_po_section.cos_hide_conversion .cos_tbl_row_po > div:nth-child(5) { display:none !important; }
+#cos_po_section.cos_hide_conversion .cos_tbl_hdr,
+#cos_po_section.cos_hide_conversion .cos_tbl_row_po{
+  grid-template-columns:38px 2.2fr 1fr 1fr 1fr 1fr !important;
+}
+
   .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
 
   .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
