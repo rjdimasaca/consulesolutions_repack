@@ -2431,18 +2431,26 @@ function showStep2(){
 
             // Only relevant for create/edit/xedit (ignore delete)
             if (type === context.UserEventType.DELETE) return;
+            // Read UI payloads (custpage fields) if present on this execution context.
+            // IMPORTANT: submitFields() calls (e.g., Create WO) can trigger this UE without those custpage fields,
+            // and we MUST NOT wipe persisted payloads in that case.
+            let rawSummary;
+            let rawLots;
+            try { rawSummary = rec.getValue({ fieldId: 'custpage_cos_summary_payload' }); } catch (_e) { rawSummary = undefined; }
+            try { rawLots = rec.getValue({ fieldId: 'custpage_cos_input_lots_payload' }); } catch (_e) { rawLots = undefined; }
 
-            const rawSummary = rec.getValue({ fieldId: 'custpage_cos_summary_payload' });
-            const rawLots = rec.getValue({ fieldId: 'custpage_cos_input_lots_payload' });
+            // Existing persisted payloads (truth source when UI fields are missing/blank)
+            let existingSummary = '';
+            let existingLots = '';
+            try { existingSummary = String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''); } catch (_e) {}
+            try { existingLots = String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || ''); } catch (_e) {}
 
-            // If custpage fields are unavailable (csv/web services), fall back to existing stored payloads
-            const summaryStr = (rawSummary !== null && rawSummary !== undefined)
-                ? String(rawSummary || '')
-                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '');
+            const uiSummaryStr = (rawSummary !== null && rawSummary !== undefined) ? String(rawSummary || '') : '';
+            const uiLotsStr = (rawLots !== null && rawLots !== undefined) ? String(rawLots || '') : '';
 
-            const lotsStr = (rawLots !== null && rawLots !== undefined)
-                ? String(rawLots || '')
-                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '');
+            // Only take UI values if they are non-empty after trim; otherwise keep existing
+            const summaryStr = (uiSummaryStr && uiSummaryStr.trim()) ? uiSummaryStr : existingSummary;
+            const lotsStr = (uiLotsStr && uiLotsStr.trim()) ? uiLotsStr : existingLots;
 
             const summary = safeParseJson(summaryStr) || {};
             const lotsMap = safeParseJson(lotsStr) || {};
@@ -2623,14 +2631,27 @@ function showStep2(){
                 // If anything goes wrong, keep the original summary string (do not block save)
                 finalSummaryStr = summaryStr;
             }
-
             // Persist into real record fields
-            if (finalSummaryStr !== null && finalSummaryStr !== undefined) {
-                try { rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: finalSummaryStr }); } catch (_e) {}
-            }
-            if (lotsStr !== null && lotsStr !== undefined) {
-                try { rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: lotsStr }); } catch (_e) {}
-            }
+            // Guardrails:
+            // - Never overwrite with blank strings (common when UE runs from submitFields / background updates).
+            // - Only persist when we actually have meaningful JSON snapshots.
+            try {
+                if (finalSummaryStr !== null && finalSummaryStr !== undefined) {
+                    const s = String(finalSummaryStr || '');
+                    if (s.trim()) {
+                        rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: s });
+                    }
+                }
+            } catch (_e) {}
+
+            try {
+                if (lotsStr !== null && lotsStr !== undefined) {
+                    const l = String(lotsStr || '');
+                    if (l.trim()) {
+                        rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: l });
+                    }
+                }
+            } catch (_e) {}
 
             // Helpful debug marker (log final output)
             try {

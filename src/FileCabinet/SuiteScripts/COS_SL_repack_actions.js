@@ -245,12 +245,16 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
 
     function buildWorkordersPayload(newRecord) {
         // Read UI payloads (custpage fields) – available on submit context
-        const rawSummary = newRecord.getValue({ fieldId: 'custpage_cos_summary_payload' })
-            || newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' })
-            || '';
-        const rawLots = newRecord.getValue({ fieldId: 'custpage_cos_input_lots_payload' })
-            || newRecord.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' })
-            || '';
+        const rawSummary = firstNonEmptyString(
+            newRecord.getValue({ fieldId: 'custpage_cos_summary_payload' }),
+            newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }),
+            ''
+        );
+        const rawLots = firstNonEmptyString(
+            newRecord.getValue({ fieldId: 'custpage_cos_input_lots_payload' }),
+            newRecord.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }),
+            ''
+        );
 
         const summary = safeParseJson(rawSummary) || {};
         const lotsMap = safeParseJson(rawLots) || {};
@@ -631,15 +635,15 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
             const rawLots = rec.getValue({ fieldId: 'custpage_cos_input_lots_payload' });
 
             // If custpage fields are unavailable (csv/web services), fall back to existing stored payloads
-            const summaryStr = (rawSummary !== null && rawSummary !== undefined)
-                ? String(rawSummary || '')
-                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '');
-
-            const lotsStr = (rawLots !== null && rawLots !== undefined)
-                ? String(rawLots || '')
-                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '');
-
-            const summary = safeParseJson(summaryStr) || {};
+            const summaryStr = firstNonEmptyString(
+                rawSummary,
+                rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }),
+                ''
+            );const lotsStr = firstNonEmptyString(
+                rawLots,
+                rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }),
+                ''
+            );const summary = safeParseJson(summaryStr) || {};
             const lotsMap = safeParseJson(lotsStr) || {};
 
             // Enrich summary if it looks like a valid snapshot (has outputs/inputs arrays)
@@ -820,10 +824,10 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
             }
 
             // Persist into real record fields
-            if (finalSummaryStr !== null && finalSummaryStr !== undefined) {
+            if (finalSummaryStr !== null && finalSummaryStr !== undefined && String(finalSummaryStr).trim().length) {
                 try { rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: finalSummaryStr }); } catch (_e) {}
             }
-            if (lotsStr !== null && lotsStr !== undefined) {
+            if (lotsStr !== null && lotsStr !== undefined && String(lotsStr).trim().length) {
                 try { rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: lotsStr }); } catch (_e) {}
             }
 
@@ -1263,6 +1267,19 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
             return null;
         }
     }
+
+    // Returns the first value that is a non-empty string (after trim). Otherwise returns ''.
+    function firstNonEmptyString() {
+        for (var i = 0; i < arguments.length; i++) {
+            var v = arguments[i];
+            if (v === null || v === undefined) continue;
+            var s = String(v);
+            if (s && s.trim().length) return s;
+        }
+        return '';
+    }
+
+
 
     function toNum(v) {
         const n = parseFloat(v);
