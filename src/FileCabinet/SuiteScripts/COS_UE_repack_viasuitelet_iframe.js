@@ -598,8 +598,8 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     </div>
 
     <!-- PURCHASE ORDERS -->
-    <div id="cos_po_section" class="cos_hide_conversion" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;">
-      <div style="background:#00AFEF;color:#fff;padding:10px 12px;">
+    <div id="cos_po_section" class="cos_hide_conversion" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;display:none;">
+      <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
         <div style="font-weight:bold;">Purchase Order</div>
         <div style="font-size:12px;opacity:0.9;">If inventory inputs are insufficient, order the remaining requirement</div>
       </div>
@@ -874,6 +874,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     // Ensure buttons/counts/hidden fields reflect hydrated state
     syncHidden();
     updateCounts();
+    updatePoSectionVisibility();
     updateStepButtons();
 
     window.__COS_REPACK_HYDRATED_FROM_RECORD__ = true;
@@ -1030,6 +1031,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       updatePurchaseSuggestions();
       syncHidden();
       updateCounts();
+      updatePoSectionVisibility();
     }catch(e){}
 
   function computeRequiredWeight(){
@@ -1063,7 +1065,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   function updatePurchaseSuggestions(){
     try{
       var required = computeRequiredWeight();
-      if (!(required > 0)) { poSuggested = {}; return; }
+      if (!(required > 0)) { poSuggested = {}; updatePoSectionVisibility(); return; }
 
       var issued = computeIssuedWeight();
       var remaining = required - issued;
@@ -1075,6 +1077,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
           if (!poOverrides[String(id)]) delete poSelected[id];
         });
         syncHidden();
+        updatePoSectionVisibility();
         return;
       }
 
@@ -1378,6 +1381,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         if (inputsPrepared) {
           try{ updatePurchaseSuggestions(); }catch(e){}
           try{ renderPO(); }catch(e){}
+          try{ updatePoSectionVisibility(); }catch(e){}
         }
 
         // If outputs changed and inputs already prepared, refresh inputs list (exclude outputs)
@@ -1398,6 +1402,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         if (isInputTable && inputsPrepared) {
           updatePurchaseSuggestions();
           renderPO();
+          updatePoSectionVisibility();
         }
       });
 
@@ -1411,6 +1416,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         if (isInputTable && inputsPrepared) {
           updatePurchaseSuggestions();
           renderPO();
+          updatePoSectionVisibility();
         }
       });
 
@@ -1478,6 +1484,20 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     if (outCountEl) outCountEl.textContent = countSelected(outputsSelected) + ' selected';
     if (inCountEl)  inCountEl.textContent  = countSelected(inputsSelected) + ' selected';
     if (poCountEl)  poCountEl.textContent  = countSelected(poSelected) + ' selected';
+  }
+
+
+  function updatePoSectionVisibility(){
+    try{
+      var sec = byId('cos_po_section');
+      if (!sec) return;
+      var hasSuggested = false;
+      var hasSelected  = false;
+      try{ hasSuggested = !!(poSuggested && Object.keys(poSuggested).length); }catch(e){}
+      try{ hasSelected  = !!(poSelected && Object.keys(poSelected).length); }catch(e){}
+      var needed = hasSuggested || hasSelected;
+      sec.style.display = needed ? 'block' : 'none';
+    }catch(e){}
   }
 
   function renderOutputs(){
@@ -2005,6 +2025,7 @@ function showStep2(){
   wireUiOnce();
   updateStepButtons();
   updateCounts();
+  updatePoSectionVisibility();
   syncHidden();
 
 })();
