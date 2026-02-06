@@ -67,6 +67,174 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
         return results;
     }
 
+    function findExistingPurchaseOrders(repackId) {
+        const results = [];
+        try {
+            const s = search.create({
+                type: 'purchaseorder',
+                filters: [
+                    ['mainline','is','T'],
+                    'and',
+                    ['custbody_cos_createdfromrepack','anyof', String(repackId)]
+                ],
+                columns: [
+                    search.createColumn({ name:'internalid' }),
+                    search.createColumn({ name:'tranid' })
+                ]
+            });
+
+            s.run().each(r => {
+                results.push({
+                    id: r.getValue({ name:'internalid' }),
+                    tranid: r.getValue({ name:'tranid' })
+                });
+                return true;
+            });
+        } catch (e) {
+            log.error({ title: 'COS Repack Create WO: search existing PO failed', details: e });
+        }
+        return results;
+    }
+
+    function fetchPreferredVendorMap(itemIds) {
+        const map = {};
+        const uniq = Array.from(new Set((itemIds || []).filter(Boolean).map(String)));
+        if (!uniq.length) return map;
+
+        // NetSuite has limits on 'anyof' list sizes; chunk defensively.
+        const CHUNK = 900;
+        for (let i = 0; i < uniq.length; i += CHUNK) {
+            const chunk = uniq.slice(i, i + CHUNK);
+            try {
+                const s = search.create({
+                    type: search.Type.ITEM,
+                    filters: [['internalid','anyof', chunk]],
+                    columns: [
+                        search.createColumn({ name: 'internalid' }),
+                        search.createColumn({ name: 'preferredvendor' })
+                    ]
+                });
+
+                s.run().each((r) => {
+                    const id = String(r.getValue({ name: 'internalid' }) || '');
+                    if (!id) return true;
+                    const vend = r.getValue({ name: 'preferredvendor' });
+                    if (vend) map[id] = String(vend);
+                    return true;
+                });
+            } catch (e) {
+                log.error({ title: 'COS Repack Create WO: preferred vendor lookup failed', details: e });
+            }
+        }
+        return map;
+    }
+
+    function buildPurchaseLinesFromSummary(repackRec) {
+        // Repack PO section is stored in the summary payload as summary.purchase (or variants).
+        const rawSummary = (function(){
+            try { return repackRec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''; } catch (_e) {}
+            return '';
+        })();
+
+        const summary = safeParseJson(rawSummary) || {};
+        const purchase = Array.isArray(summary.purchase) ? summary.purchase
+            : (Array.isArray(summary.purchaseOrder) ? summary.purchaseOrder
+                : (Array.isArray(summary.po) ? summary.po : []));
+
+        const lines = [];
+        purchase.forEach(p => {
+            const id = p && p.id ? String(p.id) : '';
+            const qty = toNum(p && p.qty);
+            if (!id || !(qty > 0)) return;
+            lines.push({ itemId: id, qty: qty });
+        });
+
+        // Aggregate by item
+        const byItem = {};
+        lines.forEach(l => {
+            if (!byItem[l.itemId]) byItem[l.itemId] = { itemId: l.itemId, qty: 0 };
+            byItem[l.itemId].qty = round6(toNum(byItem[l.itemId].qty) + toNum(l.qty));
+        });
+
+        return Object.keys(byItem).map(k => byItem[k]);
+    }
+
+    function createPurchaseOrdersFromLines(poLines, subsidiary, location, repackId) {
+        const DEFAULT_VENDOR_ID = '621';
+
+        const results = [];
+        const lines = Array.isArray(poLines) ? poLines : [];
+        if (!lines.length) return results;
+
+        const itemIds = lines.map(l => l.itemId);
+        const prefVendorMap = fetchPreferredVendorMap(itemIds);
+
+        // Group lines by vendor
+        const byVendor = {};
+        lines.forEach(l => {
+            const vend = prefVendorMap[l.itemId] ? String(prefVendorMap[l.itemId]) : DEFAULT_VENDOR_ID;
+            if (!byVendor[vend]) byVendor[vend] = [];
+            byVendor[vend].push(l);
+        });
+
+        Object.keys(byVendor).forEach(vendorId => {
+            const vendorLines = byVendor[vendorId] || [];
+            if (!vendorLines.length) return;
+
+            try {
+                const poRec = record.create({ type: record.Type.PURCHASE_ORDER, isDynamic: true });
+
+                // Header
+                try { poRec.setValue({ fieldId: 'entity', value: Number(vendorId) }); } catch (_e) {}
+                if (subsidiary) {
+                    try { poRec.setValue({ fieldId: 'subsidiary', value: Number(subsidiary) }); } catch (_e) {}
+                }
+                if (repackId) {
+                    try { poRec.setValue({ fieldId: 'custbody_cos_createdfromrepack', value: Number(repackId) }); } catch (_e) {}
+                }
+
+                // Lines
+                vendorLines.forEach(l => {
+                    const qty = toNum(l.qty);
+                    if (!(qty > 0)) return;
+
+                    try {
+                        poRec.selectNewLine({ sublistId: 'item' });
+                        poRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'item', value: Number(l.itemId) });
+                        poRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
+
+                        if (location) {
+                            // Location can be line-level for PO
+                            try { poRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'location', value: Number(location) }); } catch (_e) {}
+                        }
+
+                        // For now, set a safe default rate; later you can enhance to vendor cost.
+                        try { poRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'rate', value: 1 }); } catch (_e) {}
+
+                        poRec.commitLine({ sublistId: 'item' });
+                    } catch (lineErr) {
+                        try {
+                            log.error({
+                                title: 'COS Repack: PO line add failed',
+                                details: JSON.stringify({ vendorId, itemId: l.itemId, qty, error: String(lineErr) })
+                            });
+                        } catch (_e) {}
+                    }
+                });
+
+                const poId = poRec.save({ enableSourcing: true, ignoreMandatoryFields: false });
+                results.push({ vendorId: vendorId, purchaseorderId: poId });
+            } catch (e) {
+                try {
+                    log.error({ title: 'COS Repack: PO create failed', details: JSON.stringify({ vendorId, error: String(e) }) });
+                } catch (_e) {}
+                results.push({ vendorId: vendorId, purchaseorderId: null, error: String(e) });
+            }
+        });
+
+        return results;
+    }
+
     function setRepackWoCreatedFields(repackType, repackId, woIds) {
         const values = {};
         values[REPACK_STATUS_FIELDID] = REPACK_STATUS_WO_CREATED;
@@ -225,6 +393,49 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
         // Update repack status to WO Created (2)
         setRepackWoCreatedFields(repackType, repackId, woIds);
 
+        // Create Purchase Orders (optional; based on PO Section)
+        let poSectionHtml = '';
+        try {
+            const poLines = buildPurchaseLinesFromSummary(repackRec);
+            if (poLines && poLines.length) {
+                const existingPos = findExistingPurchaseOrders(repackId);
+                let poResults = [];
+                let usedExisting = false;
+
+                if (existingPos && existingPos.length) {
+                    usedExisting = true;
+                    poResults = existingPos.map(x => ({ vendorId: '', purchaseorderId: x.id, tranid: x.tranid }));
+                } else {
+                    const subsidiary = repackRec.getValue({ fieldId: 'custrecord_cos_rep_subsidiary' });
+                    const location = repackRec.getValue({ fieldId: 'custrecord_cos_rep_location' });
+                    poResults = createPurchaseOrdersFromLines(poLines, subsidiary, location, repackId);
+                }
+
+                const poRows = (poResults || []).map(r => {
+                    const ok = r.purchaseorderId ? '✅' : '❌';
+                    const label = r.tranid ? htmlEscape(r.tranid) : htmlEscape(String(r.purchaseorderId || ''));
+                    const vend = r.vendorId ? (' (Vendor: ' + htmlEscape(String(r.vendorId)) + ')') : '';
+                    return `<li>${ok} PO: <b>${label || '(unknown)'}</b> ID: <code>${htmlEscape(String(r.purchaseorderId || ''))}</code>${vend}${r.error ? ('<br/><span style="color:#b00020;">'+htmlEscape(r.error)+'</span>') : ''}</li>`;
+                }).join('');
+
+                poSectionHtml = `
+                  <div style="margin-top:14px;padding-top:10px;border-top:1px solid #ddd;">
+                    <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">Purchase Order Creation Result${usedExisting ? ' (already existed)' : ''}</div>
+                    <ul style="color:#333;">${poRows || '<li>(no results)</li>'}</ul>
+                  </div>
+                `;
+            }
+        } catch (e) {
+            try { log.error({ title: 'COS Repack: PO creation block failed', details: e }); } catch (_e) {}
+            poSectionHtml = `
+              <div style="margin-top:14px;padding-top:10px;border-top:1px solid #ddd;">
+                <div style="font-size:13px;font-weight:bold;margin-bottom:6px;color:#b00020;">Purchase Order creation failed.</div>
+                <div style="color:#333;">${htmlEscape(String(e))}</div>
+              </div>
+            `;
+        }
+
+
         // Render success page
         const rows = (created || []).map(r => {
             const ok = r.workorderId ? '✅' : '❌';
@@ -236,6 +447,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
               <div style="font-size:14px;font-weight:bold;margin-bottom:6px;">Work Order Creation Result</div>
               <div style="margin:8px 0;">Repack ID: <code>${htmlEscape(repackId)}</code></div>
               <ul style="color:#333;">${rows || '<li>(no results)</li>'}</ul>
+              ${poSectionHtml}
               <div style="margin-top:12px;">
                 <a href="#" onclick="window.close();return false;">Close</a>
               </div>
