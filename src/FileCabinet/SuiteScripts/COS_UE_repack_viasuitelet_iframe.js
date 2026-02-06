@@ -2538,14 +2538,18 @@ function showStep2(){
             const rawSummary = rec.getValue({ fieldId: 'custpage_cos_summary_payload' });
             const rawLots = rec.getValue({ fieldId: 'custpage_cos_input_lots_payload' });
 
-            // If custpage fields are unavailable (csv/web services), fall back to existing stored payloads
-            const summaryStr = (rawSummary !== null && rawSummary !== undefined)
-                ? String(rawSummary || '')
-                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '');
+            // Preserve previously-saved payloads when this submit context does not carry custpage values
+            // (e.g., Suitelet record.submitFields / xedit). This prevents Step 1/Step 2 from losing hydration data.
+            const storedSummary = String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '');
+            const storedLots = String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '');
 
-            const lotsStr = (rawLots !== null && rawLots !== undefined)
-                ? String(rawLots || '')
-                : String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '');
+            let summaryStr = '';
+            try { summaryStr = (rawSummary !== null && rawSummary !== undefined) ? String(rawSummary || '') : ''; } catch (_e) { summaryStr = ''; }
+            if (!summaryStr || !String(summaryStr).trim()) summaryStr = storedSummary;
+
+            let lotsStr = '';
+            try { lotsStr = (rawLots !== null && rawLots !== undefined) ? String(rawLots || '') : ''; } catch (_e) { lotsStr = ''; }
+            if (!lotsStr || !String(lotsStr).trim()) lotsStr = storedLots;
 
             const summary = safeParseJson(summaryStr) || {};
             const lotsMap = safeParseJson(lotsStr) || {};
@@ -2727,11 +2731,13 @@ function showStep2(){
                 finalSummaryStr = summaryStr;
             }
 
-            // Persist into real record fields
-            if (finalSummaryStr !== null && finalSummaryStr !== undefined) {
+            // Persist into real record fields (never blank-out stored payloads)
+            const finalSummaryTrim = String(finalSummaryStr || '').trim();
+            if (finalSummaryTrim) {
                 try { rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: finalSummaryStr }); } catch (_e) {}
             }
-            if (lotsStr !== null && lotsStr !== undefined) {
+            const lotsTrim = String(lotsStr || '').trim();
+            if (lotsTrim) {
                 try { rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: lotsStr }); } catch (_e) {}
             }
 
