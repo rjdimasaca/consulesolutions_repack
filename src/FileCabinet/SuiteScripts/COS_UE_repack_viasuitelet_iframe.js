@@ -163,6 +163,26 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   .cos_dist_small{font-size:11px;color:#666;}
   .cos_dist_toggle{float:right;cursor:pointer;color:#0070d2;font-size:11px;margin-left:8px;user-select:none;}
   .cos_dist_body{margin-top:2px;}
+
+/* === LAYOUT FIX: keep header & rows aligned after hiding columns ===
+   We hide Conversion / Committed / On Order via display:none. Since header rows have inline grid-template-columns,
+   we MUST override with !important and define templates that match only VISIBLE columns.
+   Visible columns (OUT/IN): [ ] Item Qty Weight Available On Hand SO Committed WO Committed ON PO Backordered Lots
+*/
+#cos_out_section .cos_tbl_hdr,
+#cos_out_section .cos_tbl_row{
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 120px !important;
+}
+#cos_in_section .cos_tbl_hdr,
+#cos_in_section .cos_tbl_row_input{
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 120px !important;
+}
+/* PO section (keep aligned if Conversion hidden) */
+#cos_po_section .cos_tbl_hdr,
+#cos_po_section .cos_tbl_row_po{
+  grid-template-columns:38px 2.2fr 1fr 1fr 1fr 1fr !important;
+}
+
 </style>
 
 <script>
@@ -541,7 +561,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     <span id="cos_out_count" style="font-size:12px;color:#333;"></span>
   </div>
 
-  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
     <div></div>
     <div>Item</div>
     <div style="text-align:right;">Qty</div>
@@ -549,12 +569,13 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     <div class="cos_col_conversion" style="text-align:right;">Conversion</div>
     <div style="text-align:right;">Available</div>
     <div style="text-align:right;">On Hand</div>
-    <div style="text-align:right;">Committed</div>
+    <div class="cos_col_committed" style="text-align:right;">Committed</div>
     <div style="text-align:right;">SO Committed</div>
     <div style="text-align:right;">WO Committed</div>
     <div style="text-align:right;">ON PO</div>
-    <div style="text-align:right;">On Order</div>
+    <div class="cos_col_onorder" style="text-align:right;">On Order</div>
     <div style="text-align:right;">Backordered</div>
+    <div class="cos_col_lots_placeholder" style="text-align:right;visibility:hidden;">Lots</div>
   </div>
 
   <div id="cos_out_rows"></div>
@@ -583,7 +604,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         <span id="cos_in_count" style="font-size:12px;color:#333;"></span>
       </div>
 
-      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
         <div></div>
         <div>Item</div>
         <div style="text-align:right;">Qty</div>
@@ -591,11 +612,11 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         <div class="cos_col_conversion" style="text-align:right;">Conversion</div>
         <div style="text-align:right;">Available</div>
         <div style="text-align:right;">On Hand</div>
-        <div style="text-align:right;">Committed</div>
+        <div class="cos_col_committed" style="text-align:right;">Committed</div>
         <div style="text-align:right;">SO Committed</div>
         <div style="text-align:right;">WO Committed</div>
         <div style="text-align:right;">ON PO</div>
-        <div style="text-align:right;">On Order</div>
+        <div class="cos_col_onorder" style="text-align:right;">On Order</div>
         <div style="text-align:right;">Backordered</div>
         <div style="text-align:right;">Lots</div>
       </div>
@@ -664,13 +685,15 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 <style>
 /* Hide Conversion columns (Step 1, Step 2, PO) - keep DOM intact */
 .cos_hide_conversion .cos_col_conversion { display:none !important; }
+.cos_col_committed { display:none !important; }
+.cos_col_onorder { display:none !important; }
 
 /* Step 1: Outputs (Conversion is 5th column) */
 #cos_out_section.cos_hide_conversion .cos_tbl_hdr > div:nth-child(5),
 #cos_out_section.cos_hide_conversion .cos_tbl_row > div:nth-child(5) { display:none !important; }
 #cos_out_section.cos_hide_conversion .cos_tbl_hdr,
 #cos_out_section.cos_hide_conversion .cos_tbl_row{
-  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 110px 110px !important;
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 120px;
 }
 
 /* Step 2: Inputs (Conversion is 5th column) */
@@ -678,7 +701,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 #cos_in_section.cos_hide_conversion .cos_tbl_row_input > div:nth-child(5) { display:none !important; }
 #cos_in_section.cos_hide_conversion .cos_tbl_hdr,
 #cos_in_section.cos_hide_conversion .cos_tbl_row_input{
-  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 110px 110px 120px !important;
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 120px;
 }
 
 /* PO Section (Conversion is 5th column) */
@@ -1317,6 +1340,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       cOnHand.textContent = (it.onhand != null ? it.onhand : '');
 
       var cCommitted = document.createElement('div');
+      cCommitted.className = 'cos_col_committed';
       var cSoCommitted = document.createElement('div');
       var cWoCommitted = document.createElement('div');
       cSoCommitted.style.textAlign = 'right';
@@ -1333,6 +1357,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       cCommitted.textContent = (it.committed != null ? it.committed : '');
 
       var cOnOrder = document.createElement('div');
+      cOnOrder.className = 'cos_col_onorder';
       cOnOrder.style.textAlign = 'right';
       cOnOrder.textContent = (it.onorder != null ? it.onorder : '');
 
@@ -1498,6 +1523,12 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         row.appendChild(cOnPo);
         row.appendChild(cOnOrder);
         row.appendChild(cBackordered);
+        // Placeholder Lots column for OUTPUT table to match INPUT layout (kept invisible)
+        var cLotsPh = document.createElement('div');
+        cLotsPh.className = 'cos_col_lots_placeholder';
+        cLotsPh.style.visibility = 'hidden';
+        cLotsPh.textContent = 'Lots';
+        row.appendChild(cLotsPh);
       }
       rowsEl.appendChild(row);
     });
