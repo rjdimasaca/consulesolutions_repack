@@ -541,7 +541,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     <span id="cos_out_count" style="font-size:12px;color:#333;"></span>
   </div>
 
-  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+  <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
     <div></div>
     <div>Item</div>
     <div style="text-align:right;">Qty</div>
@@ -552,6 +552,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     <div style="text-align:right;">Committed</div>
     <div style="text-align:right;">SO Committed</div>
     <div style="text-align:right;">WO Committed</div>
+    <div style="text-align:right;">ON PO</div>
     <div style="text-align:right;">On Order</div>
     <div style="text-align:right;">Backordered</div>
   </div>
@@ -582,7 +583,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         <span id="cos_in_count" style="font-size:12px;color:#333;"></span>
       </div>
 
-      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
         <div></div>
         <div>Item</div>
         <div style="text-align:right;">Qty</div>
@@ -593,6 +594,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         <div style="text-align:right;">Committed</div>
         <div style="text-align:right;">SO Committed</div>
         <div style="text-align:right;">WO Committed</div>
+        <div style="text-align:right;">ON PO</div>
         <div style="text-align:right;">On Order</div>
         <div style="text-align:right;">Backordered</div>
         <div style="text-align:right;">Lots</div>
@@ -668,7 +670,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 #cos_out_section.cos_hide_conversion .cos_tbl_row > div:nth-child(5) { display:none !important; }
 #cos_out_section.cos_hide_conversion .cos_tbl_hdr,
 #cos_out_section.cos_hide_conversion .cos_tbl_row{
-  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 110px !important;
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 110px 110px !important;
 }
 
 /* Step 2: Inputs (Conversion is 5th column) */
@@ -676,7 +678,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 #cos_in_section.cos_hide_conversion .cos_tbl_row_input > div:nth-child(5) { display:none !important; }
 #cos_in_section.cos_hide_conversion .cos_tbl_hdr,
 #cos_in_section.cos_hide_conversion .cos_tbl_row_input{
-  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 110px 120px !important;
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 110px 110px 120px !important;
 }
 
 /* PO Section (Conversion is 5th column) */
@@ -687,9 +689,9 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   grid-template-columns:38px 2.2fr 1fr 1fr 1fr 1fr !important;
 }
 
-  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
 
-  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row_input{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 110px 120px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
   .cos_tbl_row_input:nth-child(even){background:#fafafa;}
   .cos_tbl_row_input button{padding:6px 10px;cursor:pointer;}
 
@@ -960,7 +962,8 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
           onorder: (it.onorder != null ? String(it.onorder) : ''),
           backordered: (it.backordered != null ? String(it.backordered) : ''),
           soCommitted: (it.soCommitted != null ? String(it.soCommitted) : (it.socommitted != null ? String(it.socommitted) : '')),
-          woCommitted: (it.woCommitted != null ? String(it.woCommitted) : (it.wocommitted != null ? String(it.wocommitted) : ''))
+          woCommitted: (it.woCommitted != null ? String(it.woCommitted) : (it.wocommitted != null ? String(it.wocommitted) : '')),
+          onpo: (it.onpo != null ? String(it.onpo) : (it.onPo != null ? String(it.onPo) : ''))
         };
       });
   }
@@ -1322,6 +1325,9 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       cWoCommitted.style.textAlign = 'right';
       cWoCommitted.textContent = (it.woCommitted != null ? it.woCommitted : (it.wocommitted != null ? it.wocommitted : ''));
 
+      var cOnPo = document.createElement('div');
+      cOnPo.style.textAlign = 'right';
+      cOnPo.textContent = (it.onpo != null ? it.onpo : (it.onPo != null ? it.onPo : ''));
 
       cCommitted.style.textAlign = 'right';
       cCommitted.textContent = (it.committed != null ? it.committed : '');
@@ -1466,6 +1472,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         row.appendChild(cCommitted);
         row.appendChild(cSoCommitted);
         row.appendChild(cWoCommitted);
+        row.appendChild(cOnPo);
         row.appendChild(cOnOrder);
         row.appendChild(cBackordered);
         row.appendChild(cLots);
@@ -1488,6 +1495,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         row.appendChild(cCommitted);
         row.appendChild(cSoCommitted);
         row.appendChild(cWoCommitted);
+        row.appendChild(cOnPo);
         row.appendChild(cOnOrder);
         row.appendChild(cBackordered);
       }

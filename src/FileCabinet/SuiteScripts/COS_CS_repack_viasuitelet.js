@@ -109,6 +109,64 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
         return map;
     }
 
+
+// PO remaining quantity (open qty not yet received) for Purchase Orders
+// Uses formula: {quantity} - NVL({quantityshiprecv},0)
+    function fetchPurchaseOrderRemainingMap(itemIds, locationId) {
+        const map = {};
+        if (!itemIds || !itemIds.length || !locationId) return map;
+
+        const chunkSize = 800;
+        for (let start = 0; start < itemIds.length; start += chunkSize) {
+            const chunk = itemIds.slice(start, start + chunkSize);
+
+            try {
+                const remainingFilter = ["formulanumeric: {quantity}-nvl({quantityshiprecv},0)","greaterthan","0"]
+                console.log("fetchPurchaseOrderRemainingMap remainingFilter", remainingFilter)
+                const s = search.create({
+                    type: search.Type.TRANSACTION,
+                    filters: [
+                        ['type', 'anyof', 'PurchOrd'],
+                        'AND',
+                        ['mainline', 'is', 'F'],
+                        'AND',
+                        ['taxline', 'is', 'F'],
+                        'AND',
+                        ['shipping', 'is', 'F'],
+                        'AND',
+                        ['closed', 'is', 'F'],
+                        'AND',
+                        ['location', 'anyof', locationId],
+                        'AND',
+                        ['item', 'anyof', chunk],
+                        'AND',
+                        remainingFilter
+                    ],
+                    columns: [
+                        search.createColumn({ name: 'item', summary: search.Summary.GROUP }),
+                        search.createColumn({ name: 'formulanumeric', summary: search.Summary.SUM, formula: '{quantity}-nvl({quantityshiprecv},0)' })
+                    ]
+                });
+
+                s.run().each((r) => {
+                    const itemId = r.getValue({ name: 'item', summary: search.Summary.GROUP });
+                    if (!itemId) return true;
+
+                    const qty = r.getValue({ name: 'formulanumeric', summary: search.Summary.SUM, formula: '{quantity}-nvl({quantityshiprecv},0)' });
+                    map[String(itemId)] = String(qty || '0');
+                    return true;
+                });
+                // s.title = "REPACK:ON PO SEARCH" + new Date().getTime();
+                // var ssId = s.save();
+                console.log("repack:on po search, ss internalid", ssId)
+            } catch (e) {
+                try { log.error({ title: 'COS Repack: PO remaining search failed', details: e }); } catch (_e) {}
+            }
+        }
+
+        return map;
+    }
+
     function pushItemsToInlineHtml(items, speciesId) {
         const meta = { speciesId: speciesId || '' };
 
@@ -225,6 +283,7 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
                 const m = fetchLocationMetricsMap(ids, locationId);
                 const soMap = fetchSalesOrderCommittedMap(ids, locationId);
                 const woMap = fetchWorkOrderCommittedMap(ids, locationId);
+                const poMap = fetchPurchaseOrderRemainingMap(ids, locationId);
                 items.forEach((it) => {
                     const row = m[String(it.id)] || {};
                     it.available = row.available || '0';
@@ -241,6 +300,12 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
                     try {
                         it.woCommitted = woMap[String(it.id)] || '0';
                     } catch(e) { it.woCommitted = '0'; }
+
+
+                    // ON PO remaining (Purchase Orders open qty)
+                    try {
+                        it.onpo = poMap[String(it.id)] || '0';
+                    } catch(e) { it.onpo = '0'; }
                 });
             } catch (ignore) {}
 
