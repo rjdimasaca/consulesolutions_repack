@@ -7,6 +7,108 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
     const FIELD_SPECIES  = 'custrecord_cos_rep_species';
     const FIELD_LOCATION = 'custrecord_cos_rep_location';
 
+
+    // SO-only committed quantity (sum of transaction line quantitycommitted for Sales Orders)
+    function fetchSalesOrderCommittedMap(itemIds, locationId) {
+        const map = {};
+        if (!itemIds || !itemIds.length || !locationId) return map;
+
+        // NetSuite filter anyof has practical limits; chunk defensively
+        const chunkSize = 800;
+        for (let start = 0; start < itemIds.length; start += chunkSize) {
+            const chunk = itemIds.slice(start, start + chunkSize);
+
+            try {
+                const s = search.create({
+                    type: search.Type.TRANSACTION,
+                    filters: [
+                        ['type', 'anyof', 'SalesOrd'],
+                        'AND',
+                        ['mainline', 'is', 'F'],
+                        'AND',
+                        ['taxline', 'is', 'F'],
+                        'AND',
+                        ['shipping', 'is', 'F'],
+                        'AND',
+                        ['location', 'anyof', locationId],
+                        'AND',
+                        ['item', 'anyof', chunk],
+                        'AND',
+                        // Only lines with actual commitments
+                        ['quantitycommitted', 'greaterthan', '0']
+                    ],
+                    columns: [
+                        search.createColumn({ name: 'item', summary: search.Summary.GROUP }),
+                        search.createColumn({ name: 'quantitycommitted', summary: search.Summary.SUM })
+                    ]
+                });
+
+                s.run().each((r) => {
+                    const itemId = r.getValue({ name: 'item', summary: search.Summary.GROUP });
+                    if (!itemId) return true;
+
+                    const qty = r.getValue({ name: 'quantitycommitted', summary: search.Summary.SUM });
+                    map[String(itemId)] = String(qty || '0');
+                    return true;
+                });
+            } catch (e) {
+                try { log.error({ title: 'COS Repack: SO committed search failed', details: e }); } catch (_e) {}
+            }
+        }
+
+        return map;
+    }
+
+
+    // WO-only committed quantity (sum of transaction line quantitycommitted for Work Orders)
+    function fetchWorkOrderCommittedMap(itemIds, locationId) {
+        const map = {};
+        if (!itemIds || !itemIds.length || !locationId) return map;
+
+        const chunkSize = 800;
+        for (let start = 0; start < itemIds.length; start += chunkSize) {
+            const chunk = itemIds.slice(start, start + chunkSize);
+
+            try {
+                const s = search.create({
+                    type: search.Type.TRANSACTION,
+                    filters: [
+                        ['type', 'anyof', 'WorkOrd'],
+                        'AND',
+                        ['mainline', 'is', 'F'],
+                        'AND',
+                        ['taxline', 'is', 'F'],
+                        'AND',
+                        ['shipping', 'is', 'F'],
+                        'AND',
+                        ['location', 'anyof', locationId],
+                        'AND',
+                        ['item', 'anyof', chunk],
+                        'AND',
+                        ['quantitycommitted', 'greaterthan', '0']
+                    ],
+                    columns: [
+                        search.createColumn({ name: 'item', summary: search.Summary.GROUP }),
+                        search.createColumn({ name: 'quantitycommitted', summary: search.Summary.SUM })
+                    ]
+                });
+
+                s.run().each((r) => {
+                    const itemId = r.getValue({ name: 'item', summary: search.Summary.GROUP });
+                    if (!itemId) return true;
+
+                    const qty = r.getValue({ name: 'quantitycommitted', summary: search.Summary.SUM });
+                    map[String(itemId)] = String(qty || '0');
+                    return true;
+                });
+            } catch (e) {
+                try { log.error({ title: 'COS Repack: WO committed search failed', details: e }); } catch (_e) {}
+            }
+        }
+
+        return map;
+    }
+
     function pushItemsToInlineHtml(items, speciesId) {
         const meta = { speciesId: speciesId || '' };
 
@@ -121,6 +223,8 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
             try {
                 const ids = items.map((it) => it.id);
                 const m = fetchLocationMetricsMap(ids, locationId);
+                const soMap = fetchSalesOrderCommittedMap(ids, locationId);
+                const woMap = fetchWorkOrderCommittedMap(ids, locationId);
                 items.forEach((it) => {
                     const row = m[String(it.id)] || {};
                     it.available = row.available || '0';
@@ -128,6 +232,15 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
                     it.committed = row.committed || '0';
                     it.onorder = row.onorder || '0';
                     it.backordered = row.backordered || '0';
+                    // SO committed (Sales Orders only)
+                    try {
+                        it.soCommitted = soMap[String(it.id)] || '0';
+                    } catch(e) { it.soCommitted = '0'; }
+
+                    // WO committed (Work Orders only)
+                    try {
+                        it.woCommitted = woMap[String(it.id)] || '0';
+                    } catch(e) { it.woCommitted = '0'; }
                 });
             } catch (ignore) {}
 
