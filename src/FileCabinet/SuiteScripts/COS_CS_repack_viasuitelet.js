@@ -432,6 +432,10 @@ define(['N/currentRecord', 'N/search', 'N/record'], (currentRecord, search, reco
                 // even if fetch fails, keep the status=2 (user can retry via refresh)
             }
 
+            //we dont want to wait async before refresh, so try it this way: reload it asap, we added async because we thought it was causing the issue of not processing, issue was actually on the suitelet where it had a return statement terminating wo creation, we fixed it now
+            // 3) Reload so the banner/status updates immediately
+            location.reload();
+
 
             console.log('COS Repack: Create WO triggered', { recType: recType, recId: recId, runUrl: runUrl });
         } catch (e) {
