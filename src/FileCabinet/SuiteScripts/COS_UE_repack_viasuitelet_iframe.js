@@ -493,6 +493,373 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
             return;
         }
 
+        // EDIT MODE: lock Repack Builder when status is not Draft (1) and show VIEW-style summary instead
+        if (type === scriptContext.UserEventType.EDIT) {
+            const rec = scriptContext.newRecord;
+            let repStatus = '';
+            try { repStatus = rec.getValue({ fieldId: REPACK_STATUS_FIELDID }); } catch (_e) {}
+            const repStatusStr = (repStatus === null || repStatus === undefined) ? '' : String(repStatus);
+
+            if (repStatusStr && repStatusStr !== REPACK_STATUS_DRAFT) {
+                // Show the same Summary renderer used in VIEW mode
+
+
+
+                let summaryStr = '';
+                let lotsStr = '';
+                try { summaryStr = rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''; } catch (e) {}
+                try { lotsStr = rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || ''; } catch (e) {}
+
+                const htmlField = form.addField({
+                    id: 'custpage_cos_view_summary_html',
+                    type: serverWidget.FieldType.INLINEHTML,
+                    label: ' ',
+                    container: 'custpage_cos_input_output'
+                });
+
+                // NOTE: we purposely use the same markup + CSS classes as the interactive summary section,
+                // so VIEW mode looks identical and doesn't alienate users.
+                const viewHtml = `
+<div id="cos_summary_section" style="border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-bottom:12px;">
+  <div style="background:#2f3f53;color:#fff;padding:10px 12px;">
+    <div style="font-weight:bold;">Repack Summary</div>
+    <div style="font-size:12px;opacity:0.9;">Review outputs and inputs before proceeding</div>
+  </div>
+
+  <div id="cos_summary_body" style="background:#fff;"></div>
+</div>
+
+<style>
+  .cos_empty{padding:10px 12px;color:#666;font-size:12px;}
+  .cos_badge{display:inline-block;padding:2px 6px;border-radius:10px;background:#f1f3f6;font-size:11px;color:#333;}
+  .cos_sum_grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px;}
+  .cos_sum_box{border:1px solid #e3e3e3;border-radius:6px;overflow:hidden;}
+  .cos_sum_box_hdr{padding:8px 10px;background:#f7f7f7;border-bottom:1px solid #e3e3e3;font-weight:bold;font-size:12px;}
+  .cos_sum_row{display:grid;grid-template-columns: 2fr 1fr;gap:8px;padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;align-items:center;background:#fff;}
+  .cos_sum_row:nth-child(even){background:#fafafa;}
+  .cos_sum_qty{text-align:right;white-space:nowrap;}
+
+  .cos_dist_wrap{padding:12px;border-top:1px solid #eee;background:#fff;}
+  .cos_dist_title{font-weight:bold;font-size:12px;margin-bottom:6px;}
+  .cos_dist_sub{font-size:12px;color:#666;margin-bottom:10px;line-height:1.4;}
+  .cos_dist_grid{display:grid;grid-template-columns:1fr;gap:12px;}
+  .cos_dist_row{display:grid;grid-template-columns: 2fr 1fr 90px;gap:8px;padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;align-items:center;background:#fff;}
+  .cos_dist_row:nth-child(even){background:#fafafa;}
+  .cos_dist_right{text-align:right;white-space:nowrap;}
+  .cos_dist_small{font-size:11px;color:#666;}
+  .cos_dist_toggle{float:right;cursor:pointer;color:#0070d2;font-size:11px;margin-left:8px;user-select:none;}
+  .cos_dist_body{margin-top:2px;}
+
+/* === LAYOUT FIX: keep header & rows aligned after hiding columns ===
+   We hide Conversion / Committed / On Order via display:none. Since header rows have inline grid-template-columns,
+   we MUST override with !important and define templates that match only VISIBLE columns.
+   Visible columns (OUT/IN): [ ] Item Qty Weight Available On Hand SO Committed WO Committed ON PO Backordered Lots
+*/
+#cos_out_section .cos_tbl_hdr,
+#cos_out_section .cos_tbl_row{
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 120px !important;
+}
+#cos_in_section .cos_tbl_hdr,
+#cos_in_section .cos_tbl_row_input{
+  grid-template-columns:38px 2.2fr 1fr 1fr 110px 110px 110px 110px 110px 110px 120px !important;
+}
+/* PO section (keep aligned if Conversion hidden) */
+#cos_po_section .cos_tbl_hdr,
+#cos_po_section .cos_tbl_row_po{
+  grid-template-columns:38px 2.2fr 1fr 1fr 1fr 1fr !important;
+}
+
+</style>
+
+<script>
+(function(){
+  var SUMMARY_RAW = ${JSON.stringify(summaryStr || '')};
+  var LOTS_RAW = ${JSON.stringify(lotsStr || '')};
+
+  function safeParse(raw){
+    try{
+      if (!raw || typeof raw !== 'string') return null;
+      var t = raw.trim();
+      if (!t) return null;
+      var p = JSON.parse(t);
+      if (typeof p === 'string') {
+                try { return JSON.parse(p); } catch(_e) { return p; }
+      }
+      return p;
+    }catch(e){ return null; }
+  }
+
+  function toNum(v){ var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+  function roundNice(n){
+    var x = Number(n);
+    if (!isFinite(x)) return 0;
+    // match interactive: show integers cleanly, otherwise up to 6 decimals
+    var r = Math.round(x * 1e6) / 1e6;
+    return (Math.abs(r - Math.round(r)) < 1e-9) ? String(Math.round(r)) : String(r);
+  }
+
+  function byId(id){ return document.getElementById(id); }
+
+  var summary = safeParse(SUMMARY_RAW) || {};
+  var lotsObj = safeParse(LOTS_RAW) || {};
+  if (!lotsObj || typeof lotsObj !== 'object') lotsObj = {};
+
+  // match interactive variable name
+  var inputLotsByItemId = lotsObj;
+
+  var body = byId('cos_summary_body');
+  if (!body){
+    return;
+  }
+
+  var outs = Array.isArray(summary.outputs) ? summary.outputs : [];
+  var ins  = Array.isArray(summary.inputs) ? summary.inputs : [];
+  // Purchase Order lines are stored by the interactive UI under summary.purchase
+  var pos  = Array.isArray(summary.purchase) ? summary.purchase : (Array.isArray(summary.purchaseOrder) ? summary.purchaseOrder : []);
+
+  if (!outs.length || (!ins.length && !pos.length)){
+    body.innerHTML = '<div class="cos_empty">No saved summary to display. Build the summary and save the record.</div>';
+    return;
+  }
+
+  function normalizeRow(r){
+    if (!r) return { id:'', name:'', qty:'' };
+    return {
+      id: (r.id != null ? String(r.id) : ''),
+      name: (r.name || r.itemName || r.text || ''),
+      qty: (r.qty != null ? String(r.qty) : '')
+    };
+  }
+
+  outs = outs.map(normalizeRow);
+  ins  = ins.map(normalizeRow);
+  pos  = (Array.isArray(pos) ? pos : []).map(normalizeRow);
+
+  function buildBox(title, rows){
+    var html = '';
+    html += '<div class="cos_sum_box">';
+    html += '<div class="cos_sum_box_hdr">' + title + ' <span class="cos_badge">' + rows.length + '</span></div>';
+    rows.forEach(function(r){
+      html += '<div class="cos_sum_row">';
+      html += '<div>' + (r.name || '') + '</div>';
+      html += '<div class="cos_sum_qty">' + (r.qty || '') + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  // Shares / requirements
+  // Prefer saved distribution.shares if present, otherwise compute like interactive:
+  // share based on reqBase = qty * conv, fallback to qty if missing.
+  var outReqs = [];
+  var totalReqBase = 0;
+
+  var outConvById = {};
+  try{
+    var convMap = (summary && summary.meta && summary.meta.conversions) ? summary.meta.conversions : null;
+    if (convMap && typeof convMap === 'object') outConvById = convMap;
+  }catch(e){}
+
+  outs.forEach(function(o){
+    var qty = toNum(o.qty);
+    var conv = 0;
+    // payload enrichment may store conv on each output row
+    if (summary && Array.isArray(summary.outputs)){
+      try{
+                for (var i=0;i<summary.outputs.length;i++){
+                  var so = summary.outputs[i];
+                  if (so && String(so.id) === String(o.id) && so.conv != null){
+                        conv = toNum(so.conv);
+                        break;
+                  }
+                }
+      }catch(e){}
+    }
+    if (!conv && outConvById && outConvById[String(o.id)] != null){
+      conv = toNum(outConvById[String(o.id)]);
+    }
+    var reqBase = qty * conv;
+    outReqs.push({ id:o.id, name:o.name, qty:o.qty, conv:conv, reqBase:reqBase, share:0 });
+    totalReqBase += reqBase;
+  });
+
+  if (totalReqBase <= 0){
+    totalReqBase = 0;
+    outReqs.forEach(function(or){
+      var q = toNum(or.qty);
+      or.reqBase = q;
+      totalReqBase += q;
+    });
+  }
+
+  outReqs.forEach(function(or){
+    or.share = (totalReqBase > 0) ? (or.reqBase / totalReqBase) : 0;
+  });
+
+  // Allocation map: prefer saved distribution.allocations, else compute like interactive
+  var allocMap = {};
+  try{
+    if (summary && summary.distribution && summary.distribution.allocations && typeof summary.distribution.allocations === 'object'){
+      allocMap = summary.distribution.allocations;
+    }
+  }catch(e){}
+  if (!allocMap || typeof allocMap !== 'object') allocMap = {};
+
+  // If allocMap is empty, compute
+  if (!Object.keys(allocMap).length){
+    outReqs.forEach(function(or){ allocMap[String(or.id)] = {}; });
+
+    ins.forEach(function(inp){
+      var inQty = toNum(inp.qty);
+      var running = 0;
+      for (var i=0;i<outReqs.length;i++){
+                var or = outReqs[i];
+                var q = 0;
+                if (i === outReqs.length - 1){
+                  q = inQty - running;
+                } else {
+                  q = inQty * (or.share || 0);
+                  q = toNum(roundNice(q));
+                  running += q;
+                }
+                allocMap[String(or.id)][String(inp.id)] = q;
+      }
+    });
+  }
+
+  // Purchase Order allocation map: prefer saved distribution.purchaseAllocations, else compute
+  var poAllocMap = {};
+  try{
+    if (summary && summary.distribution && summary.distribution.purchaseAllocations && typeof summary.distribution.purchaseAllocations === 'object'){
+      poAllocMap = summary.distribution.purchaseAllocations;
+    }
+  }catch(e){}
+  if (!poAllocMap || typeof poAllocMap !== 'object') poAllocMap = {};
+
+  if (pos && pos.length && !Object.keys(poAllocMap).length){
+    outReqs.forEach(function(or){ poAllocMap[String(or.id)] = {}; });
+    pos.forEach(function(p){
+      var pQty = toNum(p.qty);
+      var running = 0;
+      for (var i=0;i<outReqs.length;i++){
+                var or = outReqs[i];
+                var q = 0;
+                if (i === outReqs.length - 1){
+                  q = pQty - running;
+                } else {
+                  q = pQty * (or.share || 0);
+                  q = toNum(roundNice(q));
+                  running += q;
+                }
+                poAllocMap[String(or.id)][String(p.id)] = q;
+      }
+    });
+  }
+
+  function buildDistBoxUsingMap(outReq){
+    var html = '';
+    html += '<div class="cos_sum_box">';
+    html += '<div class="cos_sum_box_hdr">'
+                 +  (outReq.name || '') + ' <span class="cos_badge">' + (outReq.qty || '') + '</span>'
+                 +  ' <span class="cos_dist_small">(' + roundNice((outReq.share || 0) * 100) + '%)</span>'
+                 +  ' <span class="cos_dist_toggle" data-outid="' + (outReq.id || '') + '">Hide inputs</span></div>';
+
+    html += '<div class="cos_dist_row" style="font-weight:bold;background:#f7f7f7;">'
+                 +  '<div>Input</div><div class="cos_dist_right">Allocated Qty</div><div class="cos_dist_right">Lots</div>'
+                 +  '</div>';
+
+    html += '<div id="cos_dist_body_' + (outReq.id || '') + '" class="cos_dist_body">';
+
+    ins.forEach(function(inp){
+      var q = (allocMap[String(outReq.id)] && allocMap[String(outReq.id)][String(inp.id)] != null)
+                ? allocMap[String(outReq.id)][String(inp.id)]
+                : 0;
+
+      var lotArr = inputLotsByItemId[String(inp.id)] || [];
+      var lotCount = lotArr && lotArr.length ? String(lotArr.length) : '';
+
+      html += '<div class="cos_dist_row">'
+                   +  '<div>' + (inp.name || '') + '</div>'
+                   +  '<div class="cos_dist_right">' + roundNice(q) + '</div>'
+                   +  '<div class="cos_dist_right">' + (lotCount ? ('(' + lotCount + ')') : '') + '</div>'
+                   +  '</div>';
+    });
+
+    if (pos && pos.length){
+      html += '<div class="cos_dist_row" style="font-weight:bold;background:#f7f7f7;">'
+                   +  '<div>Purchase Order</div><div class="cos_dist_right"></div><div class="cos_dist_right"></div>'
+                   +  '</div>';
+
+      pos.forEach(function(p){
+                var q = (poAllocMap[String(outReq.id)] && poAllocMap[String(outReq.id)][String(p.id)] != null)
+                  ? poAllocMap[String(outReq.id)][String(p.id)]
+                  : 0;
+
+                html += '<div class="cos_dist_row">'
+                         +  '<div>' + (p.name ? ('[PO] ' + p.name) : '[PO]') + '</div>'
+                         +  '<div class="cos_dist_right">' + roundNice(q) + '</div>'
+                         +  '<div class="cos_dist_right"></div>'
+                         +  '</div>';
+      });
+    }
+
+    html += '</div>'; // .cos_dist_body
+    html += '</div>';
+    return html;
+  }
+
+  function bindDistToggles2(){
+    try{
+      var toggles = document.querySelectorAll('.cos_dist_toggle');
+      if (!toggles || !toggles.length) return;
+      toggles.forEach(function(t){
+                if (t._cosBound) return;
+                t._cosBound = true;
+                t.addEventListener('click', function(){
+                  var outId = t.getAttribute('data-outid') || '';
+                  if (!outId) return;
+                  var bodyEl = byId('cos_dist_body_' + outId);
+                  if (!bodyEl) return;
+                  var hidden = (bodyEl.style.display === 'none');
+                  bodyEl.style.display = hidden ? 'block' : 'none';
+                  t.textContent = hidden ? 'Hide inputs' : 'Show inputs';
+                });
+      });
+    }catch(e){}
+  }
+
+  var html2 = '';
+  html2 += '<div class="cos_sum_grid">';
+  html2 += buildBox('Outputs', outs);
+  if (ins.length) html2 += buildBox('Inputs', ins);
+  if (pos.length) html2 += buildBox('Purchase Order', pos);
+  html2 += '</div>';
+
+  html2 += '<div class="cos_dist_wrap">';
+  html2 += '<div class="cos_dist_title">Prorated Distribution of Sources → Outputs</div>';
+  html2 += '<div class="cos_dist_sub">Inputs and Purchase Order lines are distributed across outputs based on each of their share of the total requirement (Qty × Conversion). If conversions are missing, the share falls back to output quantities.</div>';
+  html2 += '<div class="cos_dist_grid">';
+  outReqs.forEach(function(or){
+    html2 += buildDistBoxUsingMap(or);
+  });
+  html2 += '</div>';
+  html2 += '</div>';
+
+  body.innerHTML = html2;
+  bindDistToggles2();
+
+})();
+</script>
+`;
+                htmlField.defaultValue = viewHtml;
+
+                // No interactive UI in EDIT when not Draft
+                return;
+            }
+        }
+
+
 // Keep client-side UX: item list updates on fieldChanged/pageInit
         form.clientScriptModulePath = './COS_CS_repack.js';
 
@@ -890,8 +1257,12 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
     var outsArr = parsed.outputs || (parsed.data && parsed.data.outputs) || parsed.outs || [];
     var insArr  = parsed.inputs  || (parsed.data && parsed.data.inputs)  || parsed.ins  || [];
 
+    // Purchase Order lines (PO Section)
+    var poArr   = parsed.purchase || (parsed.data && parsed.data.purchase) || parsed.purchaseOrder || parsed.po || [];
+
     if (!Array.isArray(outsArr)) outsArr = [];
     if (!Array.isArray(insArr))  insArr = [];
+    if (!Array.isArray(poArr))   poArr = [];
 
     // Build selection maps
     var outMap = {};
@@ -925,26 +1296,56 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
       inMap[id] = { id: id, name: name, qty: qty, conversion: conv };
     });
 
+
+    var poMap = {};
+    poArr.forEach(function(p){
+      if (!p) return;
+      var id = String(p.id || p.itemId || p.internalid || p.internalId || '');
+      if (!id) return;
+      var name = String(p.name || p.itemName || p.text || '');
+      var qty  = (p.qty != null ? String(p.qty) : (p.quantity != null ? String(p.quantity) : ''));
+      var conv = (p.conversion != null ? String(p.conversion) : '');
+      if (!conv) {
+        var it = allItems.find(function(x){ return String(x.id) === id; });
+        if (it && it.conversion != null) conv = String(it.conversion);
+      }
+      var vendorId = String(p.vendorId || p.vendor || p.vendorid || '');
+      poMap[id] = { id: id, name: name, qty: qty, conversion: conv };
+      if (vendorId) poMap[id].vendorId = vendorId;
+    });
     // If there's nothing to hydrate, skip
     if (!Object.keys(outMap).length && !Object.keys(inMap).length) return;
 
     outputsSelected = outMap;
     inputsSelected  = inMap;
 
-    // Re-render Step 1 immediately with restored outputs
+        poSelected      = poMap;
+// Re-render Step 1 immediately with restored outputs
     try { renderOutputs(); } catch(e) {}
 
-    // Mark step2 prepared if we have inputs
-    inputsPrepared = Object.keys(inputsSelected).length > 0;
+    // Mark step2 prepared if we have inputs OR PO lines
+    var inCountHyd = 0;
+    var poCountHyd = 0;
+    try { inCountHyd = Object.keys(inputsSelected || {}).length; } catch(e) { inCountHyd = 0; }
+    try { poCountHyd = Object.keys(poSelected || {}).length; } catch(e) { poCountHyd = 0; }
 
-    // Show step2 + summary (as if user walked through steps)
+    inputsPrepared = (inCountHyd + poCountHyd) > 0;
+
+    // Show Step 2 container without autosuggest (preserve saved selections)
     if (inputsPrepared) {
-      showStep2();
-      renderInputs();
+      try {
+        var wrap = byId('cos_step2_wrap');
+        if (wrap) wrap.style.display = 'block';
+      } catch(e) {}
+
+      try { renderInputs(); } catch(e) {}
+      try { renderPO(); } catch(e) {}
+      try { updatePoSectionVisibility(); } catch(e) {}
     }
-    // Only build summary if both sides exist
-    if (Object.keys(outputsSelected).length && Object.keys(inputsSelected).length) {
-      renderSummary();
+
+    // Build summary if outputs exist and there is at least one source (inputs or PO)
+    if (Object.keys(outputsSelected || {}).length && (inCountHyd + poCountHyd) > 0) {
+      try { renderSummary(); } catch(e) {}
     }
 
     // Ensure buttons/counts/hidden fields reflect hydrated state
