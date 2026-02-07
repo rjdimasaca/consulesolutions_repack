@@ -1938,7 +1938,20 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
       // events
       cb.addEventListener('change', function(){
         if (cb.checked) {
-          selectionMap[it.id] = { id: it.id, name: it.name, qty: qty.value ? qty.value : '1' };
+          // Default qty on select:
+          // - Inputs: if available < 1, default to available (can be fractional); else default to 1
+          // - Others: default to 1
+          var __defaultQty = '1';
+          try {
+            if (isInputTable) {
+              var __avail = toNum(it.available);
+              if (isFinite(__avail) && __avail < 1) {
+                __defaultQty = (__avail <= 0) ? '0' : roundNice(__avail);
+              }
+            }
+          } catch(e) {}
+
+          selectionMap[it.id] = { id: it.id, name: it.name, qty: (qty.value ? qty.value : __defaultQty) };
           if (isPOTable) {
             try {
               var v0 = (vendSel && vendSel.value) ? String(vendSel.value) : '';
@@ -1947,7 +1960,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
             } catch(e) {}
           }
           qty.disabled = false;
-          if (!qty.value) qty.value = '1';
+          if (!qty.value) qty.value = __defaultQty;
 
           // enable weight only if conv valid
           convNum = toNum(it.conversion);
