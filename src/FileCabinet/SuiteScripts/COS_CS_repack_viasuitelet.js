@@ -167,14 +167,15 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
         return map;
     }
 
-    function pushItemsToInlineHtml(items, speciesId) {
-        const meta = { speciesId: speciesId || '' };
+    function pushItemsToInlineHtml(items, meta) {
+        const m = meta || {};
+        const metaObj = { speciesId: m.speciesId || '', vendors: Array.isArray(m.vendors) ? m.vendors : [] };
 
         const tryPush = (attempt) => {
             const a = attempt || 0;
             try {
                 if (window.COS_REPACK_UI && typeof window.COS_REPACK_UI.setItems === 'function') {
-                    window.COS_REPACK_UI.setItems(items, meta);
+                    window.COS_REPACK_UI.setItems(items, metaObj);
                     return;
                 }
             } catch (e) {}
@@ -200,7 +201,8 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
             columns: [
                 search.createColumn({ name: 'internalid' }),
                 search.createColumn({ name: 'itemid' }),
-                search.createColumn({ name: 'custitem_repack_conversion' })
+                search.createColumn({ name: 'custitem_repack_conversion' }),
+                search.createColumn({ name: 'vendor' })
             ]
         });
 
@@ -214,7 +216,8 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
                 items.push({
                     id: String(id),
                     name: String(r.getValue({ name: 'itemid' }) || id),
-                    conversion: String(r.getValue({ name: 'custitem_repack_conversion' }) || '')
+                    conversion: String(r.getValue({ name: 'custitem_repack_conversion' }) || ''),
+                    preferredVendorId: String(r.getValue({ name: 'vendor' }) || '')
                 });
             });
         });
@@ -264,6 +267,53 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
         return map;
     }
 
+
+    // Vendor dropdown support for PO section
+    var __COS_VENDOR_LIST_CACHE = null;
+    var __COS_VENDOR_LIST_CACHE_TS = 0;
+
+    function fetchVendorsList() {
+        try {
+            // cache for 10 minutes to avoid repeated searches on fieldChanged
+            var now = Date.now();
+            if (__COS_VENDOR_LIST_CACHE && (now - __COS_VENDOR_LIST_CACHE_TS) < (10 * 60 * 1000)) {
+                return __COS_VENDOR_LIST_CACHE;
+            }
+
+            var list = [];
+            var s = search.create({
+                type: search.Type.VENDOR,
+                filters: [['isinactive', 'is', 'F']],
+                columns: [
+                    search.createColumn({ name: 'internalid' }),
+                    search.createColumn({ name: 'entityid' })
+                ]
+            });
+
+            var paged = s.runPaged({ pageSize: 1000 });
+            paged.pageRanges.forEach(function(range){
+                var page = paged.fetch({ index: range.index });
+                page.data.forEach(function(r){
+                    var id = r.getValue({ name: 'internalid' });
+                    if (!id) return;
+                    list.push({ id: String(id), name: String(r.getValue({ name: 'entityid' }) || id) });
+                });
+            });
+
+            // ensure default vendor 621 is present
+            var has621 = list.some(function(v){ return String(v.id) === '621'; });
+            if (!has621) list.unshift({ id: '621', name: '621' });
+
+            __COS_VENDOR_LIST_CACHE = list;
+            __COS_VENDOR_LIST_CACHE_TS = now;
+
+            return list;
+        } catch (e) {
+            // fallback: include default vendor only
+            return [{ id: '621', name: '621' }];
+        }
+    }
+
     function refreshItems() {
         try {
             const rec = currentRecord.get();
@@ -271,7 +321,7 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
             const locationId = rec.getValue({ fieldId: FIELD_LOCATION });
 
             if (!speciesId) {
-                pushItemsToInlineHtml([], '');
+                pushItemsToInlineHtml([], { speciesId: '', vendors: fetchVendorsList() });
                 return;
             }
 
@@ -309,9 +359,10 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
                 });
             } catch (ignore) {}
 
-            pushItemsToInlineHtml(items, String(speciesId));
+            var vendors = fetchVendorsList();
+            pushItemsToInlineHtml(items, { speciesId: String(speciesId), vendors: vendors });
         } catch (e) {
-            pushItemsToInlineHtml([], '');
+            pushItemsToInlineHtml([], { speciesId: '', vendors: fetchVendorsList() });
             try { console.error('COS_CS refreshItems error', e); } catch (ignore) {}
         }
     }

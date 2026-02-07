@@ -637,9 +637,10 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
         <span id="cos_po_hint" style="font-size:12px;color:#666;margin-left:auto;"></span>
       </div>
 
-      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 1fr 1fr;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
+      <div class="cos_tbl_hdr" style="display:grid;grid-template-columns:38px 2.2fr 1.4fr 1fr 1fr 120px 1fr 1fr;gap:8px;padding:8px 12px;font-weight:bold;font-size:12px;background:#eee;border-bottom:1px solid #ddd;align-items:center;">
         <div></div>
         <div>Item</div>
+        <div>Vendor</div>
         <div style="text-align:right;">Order Qty</div>
         <div style="text-align:right;">Order Weight</div>
         <div class="cos_col_conversion" style="text-align:right;">Conversion</div>
@@ -705,11 +706,11 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
 }
 
 /* PO Section (Conversion is 5th column) */
-#cos_po_section.cos_hide_conversion .cos_tbl_hdr > div:nth-child(5),
-#cos_po_section.cos_hide_conversion .cos_tbl_row_po > div:nth-child(5) { display:none !important; }
+#cos_po_section.cos_hide_conversion .cos_tbl_hdr > div:nth-child(6),
+#cos_po_section.cos_hide_conversion .cos_tbl_row_po > div:nth-child(6) { display:none !important; }
 #cos_po_section.cos_hide_conversion .cos_tbl_hdr,
 #cos_po_section.cos_hide_conversion .cos_tbl_row_po{
-  grid-template-columns:38px 2.2fr 1fr 1fr 1fr 1fr !important;
+  grid-template-columns:38px 2.2fr 1.4fr 1fr 1fr 1fr 1fr !important;
 }
 
   .cos_tbl_row{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 110px 110px 110px 110px 110px 110px 110px 110px;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
@@ -718,7 +719,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   .cos_tbl_row_input:nth-child(even){background:#fafafa;}
   .cos_tbl_row_input button{padding:6px 10px;cursor:pointer;}
 
-  .cos_tbl_row_po{display:grid;grid-template-columns:38px 2.2fr 1fr 1fr 120px 1fr 1fr;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
+  .cos_tbl_row_po{display:grid;grid-template-columns:38px 2.2fr 1.4fr 1fr 1fr 120px 1fr 1fr;gap:8px;padding:8px 12px;font-size:12px;border-bottom:1px solid #eee;align-items:center;background:#fff;}
   .cos_tbl_row_po:nth-child(even){background:#fafafa;}
   .cos_tbl_row_po input[type="text"]{padding:6px;width:140px;text-align:right;}
   .cos_tbl_row_po input[type="checkbox"]{width:16px;height:16px;}
@@ -754,6 +755,31 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
   var SUITELET_BASE_URL = ${JSON.stringify(suiteletBaseUrl)};
   // State
   var inputLotsByItemId = {}; // itemId -> lots[]
+  var vendorsList = []; // [{id,name}]
+  var DEFAULT_PO_VENDOR_ID = '621';
+
+  function getDefaultVendorId(it){
+    try{
+      var pv = (it && (it.preferredVendorId || it.vendorId || it.vendor || it.preferredvendor || it.preferredVendor)) ? String(it.preferredVendorId || it.vendorId || it.vendor || it.preferredvendor || it.preferredVendor) : '';
+      pv = pv ? pv.trim() : '';
+      return pv || DEFAULT_PO_VENDOR_ID;
+    }catch(e){ return DEFAULT_PO_VENDOR_ID; }
+  }
+
+  function fillVendorSelect(sel, selectedId){
+    try{
+      while(sel.firstChild){ sel.removeChild(sel.firstChild); }
+      var list = Array.isArray(vendorsList) ? vendorsList : [];
+      if (!list.length){ list = [{ id: DEFAULT_PO_VENDOR_ID, name: DEFAULT_PO_VENDOR_ID }]; }
+      list.forEach(function(v){
+        var opt = document.createElement('option');
+        opt.value = String(v.id);
+        opt.textContent = String(v.name || v.id);
+        sel.appendChild(opt);
+      });
+      sel.value = String(selectedId || DEFAULT_PO_VENDOR_ID);
+    }catch(e){}
+  }
   function syncInputLotsHidden(){
     try{
       var h = byId('custpage_cos_input_lots_payload');
@@ -979,6 +1005,8 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
           id: String(it.id || it.internalid),
           name: String(it.name || it.itemid || it.text || it.value || it.id),
           conversion: (it.conversion != null ? String(it.conversion) : ''),
+          preferredVendorId: (it.preferredVendorId != null ? String(it.preferredVendorId) : (it.vendorId != null ? String(it.vendorId) : (it.vendor != null ? String(it.vendor) : (it.preferredvendor != null ? String(it.preferredvendor) : (it.preferredVendor != null ? String(it.preferredVendor) : ''))))),
+
           available: (it.available != null ? String(it.available) : ''),
           onhand: (it.onhand != null ? String(it.onhand) : ''),
           committed: (it.committed != null ? String(it.committed) : ''),
@@ -1279,6 +1307,26 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       var c2 = document.createElement('div');
       c2.textContent = it.name;
 
+      // vendor (PO only)
+      var cVend = null;
+      var vendSel = null;
+      if (isPOTable) {
+        cVend = document.createElement('div');
+        vendSel = document.createElement('select');
+        vendSel.style.width = '100%';
+        vendSel.style.padding = '6px';
+        var existingVend = selectionMap[it.id] && selectionMap[it.id].vendorId ? String(selectionMap[it.id].vendorId) : '';
+        var defVend = existingVend || getDefaultVendorId(it);
+        fillVendorSelect(vendSel, defVend);
+        vendSel.disabled = !selectionMap[it.id];
+        vendSel.addEventListener('change', function(){
+          if (!selectionMap[it.id]) return;
+          selectionMap[it.id].vendorId = String(vendSel.value || DEFAULT_PO_VENDOR_ID);
+          syncHidden();
+        });
+        cVend.appendChild(vendSel);
+      }
+
       // qty
       var cQty = document.createElement('div');
       cQty.style.textAlign = 'right';
@@ -1401,6 +1449,13 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       cb.addEventListener('change', function(){
         if (cb.checked) {
           selectionMap[it.id] = { id: it.id, name: it.name, qty: qty.value ? qty.value : '1' };
+          if (isPOTable) {
+            try {
+              var v0 = (vendSel && vendSel.value) ? String(vendSel.value) : '';
+              selectionMap[it.id].vendorId = v0 || getDefaultVendorId(it);
+              if (vendSel) vendSel.disabled = false;
+            } catch(e) {}
+          }
           qty.disabled = false;
           if (!qty.value) qty.value = '1';
 
@@ -1414,6 +1469,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
           }
         } else {
           delete selectionMap[it.id];
+          if (isPOTable && vendSel) { try{ vendSel.disabled = true; }catch(e){} }
           qty.disabled = true;
           qty.value = '';
           wt.disabled = true;
@@ -1504,6 +1560,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
       } else if (isPOTable) {
         row.appendChild(c1);
         row.appendChild(c2);
+        row.appendChild(cVend);
         row.appendChild(cQty);
         row.appendChild(cWt);
         row.appendChild(cConv);
@@ -2043,6 +2100,9 @@ function showStep2(){
 
   window.COS_REPACK_UI.setItems = function(items, meta){
     lastMeta = meta || {};
+    try{
+      if (lastMeta && Array.isArray(lastMeta.vendors)) vendorsList = lastMeta.vendors;
+    }catch(e){}
     allItems = normalizeItems(items);
 
     // Preserve any server-prefilled payload values before resetAll() wipes them via syncHidden()
