@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType ClientScript
  */
-define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
+define(['N/currentRecord', 'N/search', 'N/record'], (currentRecord, search, record) => {
 
     const FIELD_SPECIES  = 'custrecord_cos_rep_species';
     const FIELD_LOCATION = 'custrecord_cos_rep_location';
@@ -371,114 +371,73 @@ define(['N/currentRecord', 'N/search'], (currentRecord, search) => {
         refreshItems();
     }
 
-    function cosOpenCreateWoModal() {
-        // Prefer iframe modal (UE should set hidden field `custpage_cos_createwo_url`)
-        // Fallback: if an inline handler exists, call it.
+    async function cosOpenCreateWoModal() {
         try {
             const rec = currentRecord.get();
-            const urlVal = rec.getValue({ fieldId: 'custpage_cos_createwo_url' });
-            const suiteletUrl = (urlVal && String(urlVal).trim()) ? String(urlVal).trim() : '';
+            const urlFieldId = 'custpage_cos_createwo_url';
+            const baseUrl = rec.getValue({ fieldId: urlFieldId });
 
-            if (suiteletUrl) {
-                const OVERLAY_ID = 'cos_createwo_overlay';
-                const MODAL_ID = 'cos_createwo_modal';
-                const IFRAME_ID = 'cos_createwo_iframe';
+            if (!baseUrl) {
+                alert('Create WO URL is not available.');
+                return;
+            }
 
-                const closeModal = (opts) => {
-                    const o = opts || {};
-                    try {
-                        const overlay = document.getElementById(OVERLAY_ID);
-                        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-                        const modal = document.getElementById(MODAL_ID);
-                        if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
-                    } catch (ignore) {}
-                    if (o.refresh) {
-                        try { window.location.reload(); } catch (ignore) {}
+            // 1) Mark status=2 first (server-side) so the next reload shows "WO Creation In Progress"
+            // NOTE: This is done here (client) per latest requirement; Suitelet should not set status=2.
+            const recId = rec.id;
+            const recType = rec.type;
+
+            if (!recId || !recType) {
+                alert('Unable to identify this record for status update.');
+                return;
+            }
+
+            try {
+                record.submitFields({
+                    type: recType,
+                    id: recId,
+                    values: {
+                        custrecord_cos_rep_status: '2'
+                    },
+                    options: {
+                        enableSourcing: false,
+                        ignoreMandatoryFields: true
                     }
-                };
-
-                // inject styles once
-                if (!document.getElementById('cos_createwo_modal_style')) {
-                    const style = document.createElement('style');
-                    style.id = 'cos_createwo_modal_style';
-                    style.type = 'text/css';
-                    style.appendChild(document.createTextNode(
-                        '#' + OVERLAY_ID + '{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;}' +
-                        '#' + MODAL_ID + '{position:fixed;inset:4%;background:#fff;border-radius:10px;z-index:100001;box-shadow:0 10px 30px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column;}' +
-                        '#' + MODAL_ID + ' .cos_hdr{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #e5e5e5;}' +
-                        '#' + MODAL_ID + ' .cos_title{font-weight:600;font-size:14px;flex:1;}' +
-                        '#' + MODAL_ID + ' .cos_btn{cursor:pointer;border:1px solid #ccc;border-radius:8px;padding:6px 10px;background:#f7f7f7;}' +
-                        '#' + MODAL_ID + ' .cos_btn:hover{background:#efefef;}' +
-                        '#' + IFRAME_ID + '{width:100%;height:100%;border:0;flex:1;}'
-                    ));
-                    document.head.appendChild(style);
-                }
-
-                // wire postMessage listener once
-                if (!window.__COS_CREATEWO_MSG_WIRED__) {
-                    window.__COS_CREATEWO_MSG_WIRED__ = true;
-                    window.addEventListener('message', function (evt) {
-                        try {
-                            const msg = evt && evt.data;
-                            if (!msg || typeof msg !== 'object') return;
-                            if (msg.type === 'COS_REPACK_CREATEWO_CLOSE') closeModal({ refresh: false });
-                            if (msg.type === 'COS_REPACK_CREATEWO_DONE') closeModal({ refresh: true });
-                        } catch (ignore) {}
-                    });
-                }
-
-                // close any existing modal then open
-                closeModal({ refresh: false });
-
-                const overlay = document.createElement('div');
-                overlay.id = OVERLAY_ID;
-                overlay.onclick = function () { closeModal({ refresh: false }); };
-                document.body.appendChild(overlay);
-
-                const modal = document.createElement('div');
-                modal.id = MODAL_ID;
-
-                const hdr = document.createElement('div');
-                hdr.className = 'cos_hdr';
-
-                const title = document.createElement('div');
-                title.className = 'cos_title';
-                title.textContent = 'Create Work Orders';
-
-                const btnClose = document.createElement('button');
-                btnClose.type = 'button';
-                btnClose.className = 'cos_btn';
-                btnClose.textContent = 'Close';
-                btnClose.onclick = function () { closeModal({ refresh: false }); };
-
-                hdr.appendChild(title);
-                hdr.appendChild(btnClose);
-
-                const iframe = document.createElement('iframe');
-                iframe.id = IFRAME_ID;
-                iframe.src = suiteletUrl;
-
-                modal.appendChild(hdr);
-                modal.appendChild(iframe);
-
-                document.body.appendChild(modal);
-
-                try { console.log('COS_CS cosOpenCreateWoModal iframe', suiteletUrl); } catch (ignore) {}
+                });
+            } catch (e) {
+                console.log('COS Repack: failed to set status=2', e);
+                alert('Unable to set status to "Work Order Creation In Progress". Please try again.');
                 return;
             }
+
+            // 2) Fire the WO creation Suitelet call (do not wait).
+            // Use keepalive so the request can continue even if we reload immediately.
+            const runUrl = baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + 'action=createWO';
+            console.log("runUrl", runUrl);
+            try {
+                var resp = await fetch(runUrl, { method: 'GET', credentials: 'same-origin', keepalive: true });
+
+                console.log("cosOpenCreateWoModal resp", resp)
+                if(resp.ok)
+                {
+                    // 3) Reload so the banner/status updates immediately
+                    location.reload();
+                }
+                else
+                {
+                    alert("ERROR connecting to the suitelet")
+                }
+            } catch (e) {
+                console.log('COS Repack: failed to call Create WO suitelet', e);
+                // even if fetch fails, keep the status=2 (user can retry via refresh)
+            }
+
+
+            console.log('COS Repack: Create WO triggered', { recType: recType, recId: recId, runUrl: runUrl });
         } catch (e) {
-            try { console.error('COS_CS cosOpenCreateWoModal error', e); } catch (ignore) {}
+            console.log('COS Repack: error starting WO creation', e);
+            alert('Unable to start Work Order creation.');
         }
-
-        // fallback to old inline handler if present
-        try {
-            if (window.cosOpenCreateWoModal_inline) {
-                window.cosOpenCreateWoModal_inline();
-                return;
-            }
-        } catch (ignore) {}
-
-        alert('Create WO URL is not available.');
     }
     function fieldChanged(context) {
         if (!context) return;
