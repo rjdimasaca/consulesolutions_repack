@@ -1864,6 +1864,48 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
       // last-edited-wins guards
       var isProg = false;
 
+      // Track previous qty for Input table validation (qty <= available)
+      var prevQty = qty.value || '';
+      qty.addEventListener('focus', function(){
+        try { prevQty = qty.value || ''; } catch(e) { prevQty = ''; }
+      });
+      wt.addEventListener('focus', function(){
+        // weight edits can change qty via conversion; keep a snapshot too
+        try { prevQty = qty.value || ''; } catch(e) { prevQty = ''; }
+      });
+
+      function enforceInputQtyNotGreaterThanAvailable(){
+        try{
+          if (!isInputTable) return true;
+          if (!selectionMap[it.id]) return true; // only validate when selected
+          var avail = toNum(it.available);
+          // If available is missing/blank, do not block
+          if (!(avail >= 0)) return true;
+          var q = toNum(qty.value);
+          if (!(q >= 0)) q = 0;
+          if (q > avail) {
+            // revert to previous value
+            qty.value = prevQty || '';
+            selectionMap[it.id].qty = qty.value;
+
+            // normalize weight based on reverted qty
+            var conv = toNum(it.conversion);
+            if (conv > 0 && qty.value !== '') {
+              wt.value = round3(toNum(qty.value) * conv);
+            } else {
+              wt.value = '';
+            }
+
+            try { alert('Input quantity cannot exceed Available (' + avail + ').'); } catch(e) {}
+            syncHidden();
+            return false;
+          }
+          // accept and update prev snapshot
+          prevQty = qty.value || '';
+          return true;
+        }catch(e){ return true; }
+      }
+
       function setQtyFromWeight(){
         if (!selectionMap[it.id]) return;
         var conv = toNum(it.conversion);
@@ -1943,6 +1985,16 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
       qty.addEventListener('blur', function(){
         if (isProg) return;
         if (!selectionMap[it.id]) return;
+        // Validate inputs: qty cannot exceed available
+        if (!enforceInputQtyNotGreaterThanAvailable()) {
+          // If it failed, keep PO suggestions consistent and exit early
+          if (isInputTable && inputsPrepared) {
+            try { updatePurchaseSuggestions(); } catch(e) {}
+            try { renderPO(); } catch(e) {}
+            try { updatePoSectionVisibility(); } catch(e) {}
+          }
+          return;
+        }
         selectionMap[it.id].qty = qty.value;
         if (isPOTable) { poOverrides[String(it.id)] = true; }
         // LAST EDITED WINS: qty is source of truth
@@ -3726,9 +3778,3 @@ function showStep2(){
     return { beforeLoad, beforeSubmit, afterSubmit };
 
 });
-
-
-// nlapiSetFieldValue("custrecord_cos_rep_subsidiary", 2);
-// nlapiSetFieldValue("custrecord_cos_rep_location", 2);
-// nlapiSetFieldValue("custrecord_cos_rep_status", 1);
-// nlapiSetFieldValue("custrecord_cos_rep_species", 3);
