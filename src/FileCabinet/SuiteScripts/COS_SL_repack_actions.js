@@ -10,9 +10,14 @@
  */
 define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, search, log, url, serverWidget) => {
 
+
     const REPACK_STATUS_FIELDID = 'custrecord_cos_rep_status';
     const REPACK_STATUS_DRAFT = '1';
-    const REPACK_STATUS_WO_CREATED = '2';
+    const REPACK_STATUS_WO_IN_PROGRESS = '2';
+    const REPACK_STATUS_WO_CREATED = '3';
+
+    // const REPACK_STATUS_DRAFT = '1';
+    // const REPACK_STATUS_WO_CREATED = '2';
 
     // Optional helper fields (safe to ignore if not present in your account)
     const REPACK_CREATED_WO_IDS_FIELDID = 'custrecord_cos_rep_created_wo_ids';
@@ -277,6 +282,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
         const repackId = req.parameters.repackid || req.parameters.id;
         const repackType = req.parameters.rectype || req.parameters.type;
         const action = (req.parameters.action || 'createWO').toString();
+        log.debug("onRequest action", action)
 
         if (!repackId || !repackType) {
             renderResultPage(context, 'COS Repack: Create Work Orders', `
@@ -317,10 +323,13 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
         const repStatusStr = (repStatus === null || repStatus === undefined) ? '' : String(repStatus);
 
         const existing = findExistingWorkOrders(repackId);
-        if (repStatusStr === REPACK_STATUS_WO_CREATED || (existing && existing.length)) {
+        log.debug("existing", existing);
+        if (repStatusStr === REPACK_STATUS_WO_CREATED || repStatusStr === REPACK_STATUS_WO_IN_PROGRESS || (existing && existing.length)) {
             // Ensure status is set to 2 if WOs exist but status wasn't updated
             try {
-                if (repStatusStr !== REPACK_STATUS_WO_CREATED && existing.length) {
+
+                log.debug("repStatusStr", repStatusStr);
+                if (repStatusStr !== REPACK_STATUS_WO_CREATED && repStatusStr !== REPACK_STATUS_WO_IN_PROGRESS && existing.length) {
                     setRepackWoCreatedFields(repackType, repackId, existing.map(x => x.id));
                 }
             } catch (_e) {}
@@ -336,11 +345,12 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
                   </div>
                 </div>
             `);
-            return;
+            // return;
         }
 
         // Build payload from saved repack fields
         const payload = buildWorkordersPayload(repackRec);
+        log.debug("payload", payload);
 
         // Validate against summary payload on the record
         const rawSummary = (function(){
@@ -367,6 +377,9 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
             `);
             return;
         }
+
+        // Status is set to 'Work Order Creation In Progress' (2) by the Client Script before calling this Suitelet.
+
 
         // Repack flag: if checked, mark created Work Orders as WIP
         let repackMarkWip = false;
