@@ -39,6 +39,32 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
         });
 
 
+
+        // Lock core header fields when status is not Draft (prevents user modification after WO creation/in-progress)
+        try {
+            const recForLock = scriptContext.newRecord;
+            let repStatusVal = '';
+            try { repStatusVal = recForLock.getValue({ fieldId: REPACK_STATUS_FIELDID }); } catch (_e) {}
+            const repStatusStrLock = (repStatusVal === null || repStatusVal === undefined) ? '' : String(repStatusVal);
+
+            if (type === scriptContext.UserEventType.EDIT && repStatusStrLock && repStatusStrLock !== REPACK_STATUS_DRAFT) {
+                const lockFieldIds = [
+                    'custrecord_cos_rep_subsidiary',
+                    'custrecord_cos_rep_location',
+                    'custrecord_cos_rep_status',
+                    'custrecord_cos_rep_date',
+                    'custrecord_cos_rep_species',
+                    'custrecord_cos_rep_wip'
+                ];
+
+                lockFieldIds.forEach((fid) => {
+                    try {
+                        const f = form.getField({ id: fid });
+                        if (f) f.updateDisplayType({ displayType: serverWidget.FieldDisplayType.DISABLED });
+                    } catch (_e2) {}
+                });
+            }
+        } catch (_e) {}
         // Client Script (also needed in VIEW mode for the Create Work Orders iframe modal)
         form.clientScriptModulePath = './COS_CS_repack.js';
 
@@ -3700,3 +3726,9 @@ function showStep2(){
     return { beforeLoad, beforeSubmit, afterSubmit };
 
 });
+
+
+// nlapiSetFieldValue("custrecord_cos_rep_subsidiary", 2);
+// nlapiSetFieldValue("custrecord_cos_rep_location", 2);
+// nlapiSetFieldValue("custrecord_cos_rep_status", 1);
+// nlapiSetFieldValue("custrecord_cos_rep_species", 3);
