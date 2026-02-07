@@ -141,22 +141,28 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
             : (Array.isArray(summary.purchaseOrder) ? summary.purchaseOrder
                 : (Array.isArray(summary.po) ? summary.po : []));
 
+        const DEFAULT_VENDOR_ID = '621';
+
+        // Normalize lines from UI payload (vendorId should already be provided by the UI)
         const lines = [];
         purchase.forEach(p => {
             const id = p && p.id ? String(p.id) : '';
             const qty = toNum(p && p.qty);
+            const vendorIdRaw = (p && (p.vendorId || p.vendor || p.vendorid)) ? String(p.vendorId || p.vendor || p.vendorid) : '';
+            const vendorId = vendorIdRaw && vendorIdRaw.trim() ? vendorIdRaw.trim() : DEFAULT_VENDOR_ID;
             if (!id || !(qty > 0)) return;
-            lines.push({ itemId: id, qty: qty });
+            lines.push({ itemId: id, qty: qty, vendorId: vendorId });
         });
 
-        // Aggregate by item
-        const byItem = {};
+        // Aggregate by vendor + item
+        const byKey = {};
         lines.forEach(l => {
-            if (!byItem[l.itemId]) byItem[l.itemId] = { itemId: l.itemId, qty: 0 };
-            byItem[l.itemId].qty = round6(toNum(byItem[l.itemId].qty) + toNum(l.qty));
+            const key = String(l.vendorId) + '|' + String(l.itemId);
+            if (!byKey[key]) byKey[key] = { itemId: l.itemId, qty: 0, vendorId: l.vendorId };
+            byKey[key].qty = round6(toNum(byKey[key].qty) + toNum(l.qty));
         });
 
-        return Object.keys(byItem).map(k => byItem[k]);
+        return Object.keys(byKey).map(k => byKey[k]);
     }
 
     function createPurchaseOrdersFromLines(poLines, subsidiary, location, repackId) {
@@ -166,15 +172,13 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
         const lines = Array.isArray(poLines) ? poLines : [];
         if (!lines.length) return results;
 
-        const itemIds = lines.map(l => l.itemId);
-        const prefVendorMap = fetchPreferredVendorMap(itemIds);
-
-        // Group lines by vendor
+        // Group lines by vendor (vendor is provided by UI; fallback to default)
         const byVendor = {};
         lines.forEach(l => {
-            const vend = prefVendorMap[l.itemId] ? String(prefVendorMap[l.itemId]) : DEFAULT_VENDOR_ID;
-            if (!byVendor[vend]) byVendor[vend] = [];
-            byVendor[vend].push(l);
+            const vend = (l && l.vendorId) ? String(l.vendorId) : DEFAULT_VENDOR_ID;
+            const vendorId = vend && vend.trim() ? vend.trim() : DEFAULT_VENDOR_ID;
+            if (!byVendor[vendorId]) byVendor[vendorId] = [];
+            byVendor[vendorId].push(l);
         });
 
         Object.keys(byVendor).forEach(vendorId => {
@@ -679,7 +683,11 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
             if (!Array.isArray(wo.inputs)) {
                 addErr('WO_INPUTS_NOT_ARRAY', path + '.inputs must be an array.');
             } else if (!wo.inputs.length) {
-                addErr('WO_INPUTS_EMPTY', path + '.inputs is empty.');
+                // Allow empty inventory inputs if PO lines exist (future stocks can still supply components)
+                const hasPosPo = (Array.isArray(wo.purchase) ? wo.purchase : []).some(x => toNum(x && x.po_item_quantity) > 0);
+                if (!hasPosPo) {
+                    addErr('WO_INPUTS_EMPTY', path + '.inputs is empty and no PO components are provided.');
+                }
             } else {
                 wo.inputs.forEach((inp, jdx) => {
                     const ipath = path + '.inputs[' + jdx + ']';
