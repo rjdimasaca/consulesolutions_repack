@@ -370,6 +370,22 @@ define(['N/currentRecord', 'N/search', 'N/record'], (currentRecord, search, reco
     function pageInit() {
         refreshItems();
     }
+    function printCosRepackPdf() {
+        try {
+            const rec = currentRecord.get();
+            const u = rec.getValue({ fieldId: 'custpage_cos_printrepack_url' });
+            if (!u) {
+                alert('Print Repack URL is not available.');
+                return;
+            }
+            window.open(String(u), "_blank", "width=1100,height=800,scrollbars=yes,resizable=yes");
+        } catch (e) {
+            try { console && console.log && console.log('Print Repack failed', e); } catch (_e) {}
+            alert('Unable to print Repack.');
+        }
+    }
+
+
 
     async function cosOpenCreateWoModal() {
         try {
@@ -451,5 +467,5 @@ define(['N/currentRecord', 'N/search', 'N/record'], (currentRecord, search, reco
         }
     }
 
-    return { pageInit, fieldChanged, cosOpenCreateWoModal };
+    return { pageInit, fieldChanged, cosOpenCreateWoModal, printCosRepackPdf };
 });

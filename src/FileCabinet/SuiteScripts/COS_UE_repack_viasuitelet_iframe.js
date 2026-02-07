@@ -3,7 +3,7 @@
  * @NScriptType UserEventScript
  */
 
-define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidget, url, search, log, record) => {
+define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'], (serverWidget, url, search, log, record, message) => {
 
     // Suitelet used by the "Print Repack" button (VIEW mode)
     // NOTE: replace these IDs if your Script/Deployment IDs differ in your account.
@@ -19,7 +19,8 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
     // Repack status field + values
     const REPACK_STATUS_FIELDID = 'custrecord_cos_rep_status';
     const REPACK_STATUS_DRAFT = '1';
-    const REPACK_STATUS_WO_CREATED = '2';
+    const REPACK_STATUS_WO_IN_PROGRESS = '2';
+    const REPACK_STATUS_WO_CREATED = '3';
 
     const beforeLoad = (scriptContext) => {
         const { form, type } = scriptContext;
@@ -56,6 +57,15 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
                     }
                 });
 
+
+                // Pass the resolved Print Repack URL to the client script (VIEW mode)
+                const printUrlFld = form.addField({
+                    id: 'custpage_cos_printrepack_url',
+                    type: serverWidget.FieldType.LONGTEXT,
+                    label: 'Print Repack URL'
+                });
+                printUrlFld.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+                printUrlFld.defaultValue = String(printUrl || '');
                 form.addButton({
                     id: 'custpage_cos_print_repack',
                     label: 'Print Repack',
@@ -84,6 +94,17 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record'], (serverWidge
                     const repStatusStr = (repStatus === null || repStatus === undefined) ? '' : String(repStatus);
 
                     log.debug("repStatusStr", repStatusStr);
+                    // Banner while Work Orders are being created
+                    try {
+                        if (repStatusStr === REPACK_STATUS_WO_IN_PROGRESS) {
+                            form.addPageInitMessage({
+                                type: message.Type.INFORMATION,
+                                title: 'Work Order Creation In Progress',
+                                message: 'The Work Order is being created. You can refresh this page in a moment to see the created Work Orders.'
+                            });
+                        }
+                    } catch (_e) {}
+
                     if (repStatusStr === '' || repStatusStr === REPACK_STATUS_DRAFT) {
                         const createWoUrl = url.resolveScript({
                             scriptId: CREATE_WO_SL_SCRIPTID,
