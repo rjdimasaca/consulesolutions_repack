@@ -414,24 +414,25 @@ define(['N/currentRecord', 'N/search', 'N/record'], (currentRecord, search, reco
             // Use keepalive so the request can continue even if we reload immediately.
             const runUrl = baseUrl + (baseUrl.indexOf('?') >= 0 ? '&' : '?') + 'action=createWO';
             console.log("runUrl", runUrl);
-            try {
-                var resp = await fetch(runUrl, { method: 'GET', credentials: 'same-origin', keepalive: true });
+            // try {
+            //     var resp = await fetch(runUrl, { method: 'GET', credentials: 'same-origin', keepalive: true });
+            //
+            //     console.log("cosOpenCreateWoModal resp", resp)
+            //     if(resp.ok)
+            //     {
+            //         // 3) Reload so the banner/status updates immediately
+            //         location.reload();
+            //     }
+            //     else
+            //     {
+            //         alert("ERROR connecting to the suitelet")
+            //     }
+            // } catch (e) {
+            //     console.log('COS Repack: failed to call Create WO suitelet', e);
+            //     // even if fetch fails, keep the status=2 (user can retry via refresh)
+            // }
 
-                console.log("cosOpenCreateWoModal resp", resp)
-                if(resp.ok)
-                {
-                    // 3) Reload so the banner/status updates immediately
-                    location.reload();
-                }
-                else
-                {
-                    alert("ERROR connecting to the suitelet")
-                }
-            } catch (e) {
-                console.log('COS Repack: failed to call Create WO suitelet', e);
-                // even if fetch fails, keep the status=2 (user can retry via refresh)
-            }
-
+            fetch(runUrl, { method: 'GET', credentials: 'same-origin', keepalive: true });
             //we dont want to wait async before refresh, so try it this way: reload it asap, we added async because we thought it was causing the issue of not processing, issue was actually on the suitelet where it had a return statement terminating wo creation, we fixed it now
             // 3) Reload so the banner/status updates immediately
             location.reload();
