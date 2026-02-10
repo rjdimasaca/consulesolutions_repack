@@ -1920,13 +1920,33 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
         if (!selectionMap[it.id]) return;
         var conv = toNum(it.conversion);
         if (!(conv > 0)) return;
+
         var w = toNum(wt.value);
         var q = w / conv;
+
+        // If this is an INPUT row, cap computed qty to AVAILABLE (weight must follow)
+        if (isInputTable) {
+          var avail = toNum(it.available);
+          if (isFinite(avail) && avail >= 0) {
+            // tiny epsilon to avoid float noise (e.g. 10.0000000002)
+            if (q > (avail + 1e-9)) {
+              try { alert('Only ' + roundNice(avail) + ' is available.'); } catch(e) {}
+              q = avail;
+            }
+          }
+        }
+
         isProg = true;
         qty.value = roundNice(q);
         selectionMap[it.id].qty = qty.value;
-        // keep weight normalized
+
+        // keep weight normalized to the (possibly capped) qty
         wt.value = round3(toNum(qty.value) * conv);
+
+        // keep snapshots aligned so next edit starts from the capped values
+        try { prevQty = qty.value || ''; } catch(e) { /* ignore */ }
+        try { prevWt  = wt.value  || ''; } catch(e) { /* ignore */ }
+
         isProg = false;
         syncHidden();
       }
