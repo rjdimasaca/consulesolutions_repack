@@ -1866,12 +1866,16 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
 
       // Track previous qty for Input table validation (qty <= available)
       var prevQty = qty.value || '';
+      var prevWt  = wt.value || '';
       qty.addEventListener('focus', function(){
         try { prevQty = qty.value || ''; } catch(e) { prevQty = ''; }
+        try { prevWt  = wt.value || ''; } catch(e) { prevWt  = ''; }
+        try { prevWt  = wt.value || ''; } catch(e) { prevWt  = ''; }
       });
       wt.addEventListener('focus', function(){
         // weight edits can change qty via conversion; keep a snapshot too
         try { prevQty = qty.value || ''; } catch(e) { prevQty = ''; }
+        try { prevWt  = wt.value || ''; } catch(e) { prevWt  = ''; }
       });
 
       function enforceInputQtyNotGreaterThanAvailable(){
@@ -1884,24 +1888,30 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
           var q = toNum(qty.value);
           if (!(q >= 0)) q = 0;
           if (q > avail) {
-            // revert to previous value
-            qty.value = prevQty || '';
+            // Cap to available (force both qty and weight)
+            var cappedQty = avail;
+
+            qty.value = roundNice(cappedQty);
             selectionMap[it.id].qty = qty.value;
 
-            // normalize weight based on reverted qty
             var conv = toNum(it.conversion);
-            if (conv > 0 && qty.value !== '') {
-              wt.value = round3(toNum(qty.value) * conv);
+            if (conv > 0) {
+              wt.value = round3(cappedQty * conv);
             } else {
               wt.value = '';
             }
 
-            try { alert('Input quantity cannot exceed Available (' + avail + ').'); } catch(e) {}
+            // Update snapshots to capped values
+            prevQty = qty.value || '';
+            prevWt  = wt.value || '';
+
+            try { alert('Only ' + roundNice(avail) + ' is available.'); } catch(e) {}
             syncHidden();
             return false;
           }
           // accept and update prev snapshot
           prevQty = qty.value || '';
+          try { prevWt = wt.value || ''; } catch(e) { prevWt = ''; }
           return true;
         }catch(e){ return true; }
       }
