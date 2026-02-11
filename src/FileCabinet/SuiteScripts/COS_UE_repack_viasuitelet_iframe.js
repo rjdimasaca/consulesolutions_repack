@@ -1232,6 +1232,10 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
   // id -> {id, name, qty}
   var inputsPrepared = false;
 
+  // Toggle: when true, editing WEIGHT will "snap" WEIGHT back to (QTY × Conversion) after rounding.
+  // When false, user-entered WEIGHT is preserved unless we must cap QTY to AVAILABLE.
+  var ENABLE_WEIGHT_SNAP = false;
+
   function byId(id){ return document.getElementById(id); }
 
   // Prorated distribution: collapsible input allocations per output
@@ -1921,10 +1925,13 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
         var conv = toNum(it.conversion);
         if (!(conv > 0)) return;
 
+        // preserve the raw user-entered weight text (when snapping disabled)
+        var rawWtText = (wt && typeof wt.value === 'string') ? wt.value : (wt.value + '');
         var w = toNum(wt.value);
         var q = w / conv;
 
-        // If this is an INPUT row, cap computed qty to AVAILABLE (weight must follow)
+        // If this is an INPUT row, cap computed qty to AVAILABLE
+        var didCap = false;
         if (isInputTable) {
           var avail = toNum(it.available);
           if (isFinite(avail) && avail >= 0) {
@@ -1932,18 +1939,28 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
             if (q > (avail + 1e-9)) {
               try { alert('Only ' + roundNice(avail) + ' is available.'); } catch(e) {}
               q = avail;
+              didCap = true;
             }
           }
         }
 
         isProg = true;
+
+        // QTY is the canonical value we store/use for distribution/WO creation.
         qty.value = roundNice(q);
         selectionMap[it.id].qty = qty.value;
 
-        // keep weight normalized to the (possibly capped) qty
-        wt.value = round3(toNum(qty.value) * conv);
+        // Weight snapping:
+        // - Original behavior: always normalize WEIGHT to (QTY × Conversion).
+        // - New behavior: preserve user-entered WEIGHT, unless we had to cap QTY (then WEIGHT must follow the capped QTY).
+        if (ENABLE_WEIGHT_SNAP || didCap) {
+          wt.value = round3(toNum(qty.value) * conv);
+        } else {
+          // Keep exactly what the user typed (but still keep internal snapshots aligned).
+          wt.value = rawWtText;
+        }
 
-        // keep snapshots aligned so next edit starts from the capped values
+        // keep snapshots aligned so next edit starts from consistent values
         try { prevQty = qty.value || ''; } catch(e) { /* ignore */ }
         try { prevWt  = wt.value  || ''; } catch(e) { /* ignore */ }
 
