@@ -1424,11 +1424,19 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
     var prefill = '';
     try { prefill = encodeURIComponent(JSON.stringify(prevLots)); } catch(e) { prefill = ''; }
 
+    var maxQty = '';
+    try {
+      if (item && item.id && inputsSelected && inputsSelected[String(item.id)] && inputsSelected[String(item.id)].qty != null) {
+        maxQty = inputsSelected[String(item.id)].qty;
+      }
+    } catch(e) { maxQty = ''; }
+
     var iframeUrl = buildUrl(SUITELET_BASE_URL, {
       mode: 'input',
       itemId: item ? item.id : '',
       itemText: item ? item.name : '',
       repLocationId: repLocationId,
+      maxQty: maxQty,
       prefill: prefill
     });
 
@@ -1868,6 +1876,9 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
       // last-edited-wins guards
       var isProg = false;
 
+      // Input table: Select Lots button reference (to enable/disable based on checkbox)
+      var btnLots = null;
+
       // Track previous qty for Input table validation (qty <= available)
       var prevQty = qty.value || '';
       var prevWt  = wt.value || '';
@@ -2025,6 +2036,8 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
           wt.disabled = true;
           wt.value = '';
         }
+        // Keep Select Lots button state in sync
+        if (btnLots) btnLots.disabled = !cb.checked;
         syncHidden();
         updateCounts();
         updateStepButtons();
@@ -2060,6 +2073,24 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
         // LAST EDITED WINS: qty is source of truth
         setWeightFromQty();
 
+        // If lots were previously selected for this input, warn on qty mismatch
+        if (isInputTable) {
+          try {
+            var lotArrWarn = inputLotsByItemId[String(it.id)] || [];
+            if (lotArrWarn && lotArrWarn.length) {
+              var lotSumWarn = 0;
+              for (var lw=0; lw<lotArrWarn.length; lw++) {
+                var qlw = parseFloat(lotArrWarn[lw] && lotArrWarn[lw].qty != null ? lotArrWarn[lw].qty : 0);
+                if (!isNaN(qlw)) lotSumWarn += qlw;
+              }
+              var newQtyWarn = toNum(qty.value);
+              if (Math.abs(lotSumWarn - newQtyWarn) > 1e-9) {
+                alert('Warning: You changed Qty for "' + (it.name || 'item') + '" to ' + newQtyWarn + '. Your selected lots total ' + lotSumWarn + '. Please re-open Select Lots to review.');
+              }
+            }
+          } catch(e) {}
+        }
+
         // Keep PO suggestions in sync when user changes inputs/outputs
         if (isInputTable && inputsPrepared) {
           updatePurchaseSuggestions();
@@ -2085,9 +2116,11 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
       if (isInputTable) {
         var cLots = document.createElement('div');
         cLots.style.textAlign = 'right';
-        var btnLots = document.createElement('button');
+        btnLots = document.createElement('button');
         btnLots.type = 'button';
         btnLots.textContent = 'Select Lots';
+        // Disable Select Lots unless this line is selected (checked)
+        btnLots.disabled = !cb.checked;
         var span = document.createElement('span');
         span.style.marginLeft = '8px';
         span.style.fontSize = '12px';
@@ -2098,6 +2131,10 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
         btnLots.addEventListener('click', function(e){
           e.preventDefault();
           e.stopPropagation();
+          if (!cb.checked || !selectionMap[it.id]) {
+            try { alert('Please tick the checkbox first to select this item line before selecting lots.'); } catch(ex) {}
+            return;
+          }
           openLotsModal(it);
         });
         cLots.appendChild(btnLots);
