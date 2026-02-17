@@ -1,6 +1,8 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Suitelet
+ *
+ * REFERENCES: https://suiteanswers.custhelp.com/app/answers/detail/a_id/78252/kw/78252
  */
 define(['N/search'], function (search) {
 
