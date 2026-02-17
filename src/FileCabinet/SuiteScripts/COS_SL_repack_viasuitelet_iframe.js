@@ -13,6 +13,7 @@ define(['N/search'], function (search) {
         var repLocationId = req.parameters.repLocationId || '';
 
         var prefillParam = req.parameters.prefill || '';
+        var maxQtyParam = req.parameters.maxQty || '';
 
         if (!itemId) {
             res.write(buildErrorHtml('Missing required parameter: itemId'));
@@ -30,6 +31,7 @@ define(['N/search'], function (search) {
             itemText: itemText,
             repLocationId: repLocationId,
             prefillParam: prefillParam,
+            maxQty: maxQtyParam,
             rows: rows
         }));
     }
@@ -94,6 +96,7 @@ define(['N/search'], function (search) {
         var itemText = opts.itemText;
         var repLocationId = opts.repLocationId;
         var prefillParam = opts.prefillParam || '';
+        var maxQtyParam = opts.maxQty || '';
         var rows = opts.rows || [];
 
         // Build status options from results
@@ -197,19 +200,15 @@ define(['N/search'], function (search) {
             + '(function(){'
             + '  var ITEM_ID = ' + JSON.stringify(itemId) + ';'
             + '  var ITEM_TEXT = ' + JSON.stringify(itemText) + ';'
+            + '  var MAX_QTY_RAW = ' + JSON.stringify(maxQtyParam) + ';'
+            + '  var MAX_QTY = parseFloat(MAX_QTY_RAW); if (isNaN(MAX_QTY)) MAX_QTY = 0;'
             + '  var PREFILL_RAW = ' + JSON.stringify(prefillParam) + ';'
             + '  var PREFILL_MAP = {};'
             + '  try { if (PREFILL_RAW) { var decoded = decodeURIComponent(PREFILL_RAW); var arr = JSON.parse(decoded); if (arr && arr.length) { for (var pi=0; pi<arr.length; pi++){ var it = arr[pi]; if (it && it.key) PREFILL_MAP[String(it.key)] = it; } } } } catch(e) {}'
             + '  var msgEl = document.getElementById("msg");'
             + '  function showMsg(t){ if(!msgEl) return; msgEl.style.display = t ? "block" : "none"; msgEl.textContent = t || ""; }'
             + '  function postClose(){ window.parent.postMessage({ type: "COS_REPACK_MODAL_CLOSE" }, "*"); }'
-            + '  function clampQty(q, max){'
-            + '    var n = parseFloat(q);'
-            + '    if (isNaN(n)) return "";'
-            + '    if (n < 0) n = 0;'
-            + '    if (n > max) n = max;'
-            + '    return String(n);'
-            + '  }'
+            + '  function toNum(v){ var n = parseFloat(v); return isNaN(n) ? NaN : n; }'
             + '  function getRowByKey(key){ return document.querySelector("tr.lot_tr[data-key=\\\"" + key + "\\\"]"); }'
             + '  function getQtyElByKey(key){ return document.querySelector("input.lot_qty[data-key=\\\"" + key + "\\\"]"); }'
             + '  function onCbChange(cb){'
@@ -221,20 +220,31 @@ define(['N/search'], function (search) {
             + '    var avail = parseFloat(availStr);'
             + '    if (isNaN(avail)) avail = 0;'
             + '    qtyEl.disabled = !cb.checked;'
-            + '    if (cb.checked){ qtyEl.value = String(availStr); }'
+            + '    if (cb.checked){ /* leave as-is; user may type */ }'
             + '    else { qtyEl.value = ""; }'
             + '  }'
             + '  function onQtyInput(qtyEl){'
+            + '    var v = String(qtyEl.value || "").trim();'
+            + '    if (!v){ showMsg(""); return; }'
+            + '    var n = toNum(v);'
+            + '    if (isNaN(n)){ showMsg("Quantity must be a number."); return; }'
+            + '    if (n < 0){ showMsg("Quantity cannot be negative."); return; }'
+            + '    showMsg("");'
+            + '  }'
+            + '  function onQtyBlur(qtyEl){'
             + '    var key = qtyEl.getAttribute("data-key") || "";'
             + '    var tr = getRowByKey(key);'
-            + '    if(!tr) return;'
-            + '    var availStr = tr.getAttribute("data-available") || "0";'
-            + '    var avail = parseFloat(availStr);'
-            + '    if (isNaN(avail)) avail = 0;'
-            + '    var clamped = clampQty(qtyEl.value, avail);'
-            + '    if (clamped === "" && qtyEl.value.trim() !== ""){ showMsg("Quantity must be a number."); }'
-            + '    else { showMsg(""); }'
-            + '    if (clamped !== "" || qtyEl.value.trim() === ""){ if (String(qtyEl.value) !== String(clamped)) qtyEl.value = clamped; }'
+            + '    if (!tr) return;'
+            + '    var avail = toNum(tr.getAttribute("data-available") || "");'
+            + '    if (isNaN(avail)) return;'
+            + '    var v = String(qtyEl.value || "").trim();'
+            + '    if (!v) return;'
+            + '    var n = toNum(v);'
+            + '    if (isNaN(n)) return;'
+            + '    if (n > avail){'
+            + '      alert("Only " + avail + " is available for this lot.");'
+            + '      qtyEl.value = String(avail);'
+            + '    }'
             + '  }'
             + '  function gather(){'
             + '    var out = [];'
@@ -259,8 +269,18 @@ define(['N/search'], function (search) {
             + '  }'
             + '  function validateBeforeSubmit(){'
             + '    var lots = gather();'
+            + '    var total = 0;'
             + '    for (var i=0;i<lots.length;i++){'
-            + '      if (!lots[i].qty || String(lots[i].qty).trim() === ""){ showMsg("Please enter quantity for all selected rows."); return false; }'
+            + '      var qv = String(lots[i].qty||"").trim();'
+            + '      if (!qv){ showMsg("Please enter quantity for all selected rows."); return false; }'
+            + '      var qn = toNum(qv);'
+            + '      if (isNaN(qn)){ showMsg("Quantity must be a number."); return false; }'
+            + '      if (qn < 0){ showMsg("Quantity cannot be negative."); return false; }'
+            + '      total += qn;'
+            + '    }'
+            + '    if (MAX_QTY > 0 && total > MAX_QTY + 1e-9){'
+            + '      showMsg("Total Qty to Use (" + total + ") exceeds allowed (" + MAX_QTY + "). Please reduce quantities.");'
+            + '      return false;'
             + '    }'
             + '    showMsg(""); return true;'
             + '  }'
@@ -271,7 +291,7 @@ define(['N/search'], function (search) {
             + '  var cbs = document.querySelectorAll("input.lot_cb");'
             + '  for (var i=0;i<cbs.length;i++){ (function(cb){ cb.addEventListener("change", function(){ onCbChange(cb); }); })(cbs[i]); }'
             + '  var qtys = document.querySelectorAll("input.lot_qty");'
-            + '  for (var j=0;j<qtys.length;j++){ (function(q){ q.addEventListener("input", function(){ onQtyInput(q); }); })(qtys[j]); }'
+            + '  for (var j=0;j<qtys.length;j++){ (function(q){ q.addEventListener("input", function(){ onQtyInput(q); }); q.addEventListener("blur", function(){ onQtyBlur(q); }); })(qtys[j]); }'
             + '  function applyPrefill(){'
             + '    try {'
             + '      var cbs2 = document.querySelectorAll("input.lot_cb");'
