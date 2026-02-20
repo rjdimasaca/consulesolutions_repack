@@ -16,6 +16,30 @@ define(['./COS_LIB_repack', 'N/record','N/search','N/log','N/url','N/ui/serverWi
     const REPACK_STATUS_WO_IN_PROGRESS = COS_LIB.CONST.STATUS.WO_IN_PROGRESS;
     const REPACK_STATUS_WO_CREATED = COS_LIB.CONST.STATUS.WO_CREATED;
 
+    /********************************************************************
+     * CONFIGURATION FLAGS
+     * - ALLOCATE_MODE:
+     *     A = allocate/distribute based on FULL Input Step qty (recommended)
+     *     B = allocate/distribute based on SELECTED LOT total qty only
+     * - LOT_SPLIT_STRATEGY:
+     *     P = PROPORTIONAL split of selected lots across WOs
+     *     G = GREEDY fill of selected lots across WOs (first WOs consume first)
+     ********************************************************************/
+    const ALLOCATE_BASED_ON = {
+        FULL_INPUT_QTY: 'A',
+        SELECTED_LOT_QTY: 'B'
+    };
+
+    const LOT_SPLIT_MODE = {
+        PROPORTIONAL: 'P',
+        GREEDY: 'G'
+    };
+
+    // Defaults (safe): keep existing behavior
+    const ALLOCATE_MODE = ALLOCATE_BASED_ON.FULL_INPUT_QTY;
+    const LOT_SPLIT_STRATEGY = LOT_SPLIT_MODE.PROPORTIONAL;
+
+
     // const REPACK_STATUS_DRAFT = COS_LIB.CONST.STATUS.DRAFT;
     // const REPACK_STATUS_WO_CREATED = '2';
 
@@ -495,6 +519,51 @@ define(['./COS_LIB_repack', 'N/record','N/search','N/log','N/url','N/ui/serverWi
 
         const convMap = fetchConversionMap(itemIds);
 
+
+
+        function sumLotsQty(lotsArr) {
+            try {
+                if (!Array.isArray(lotsArr) || !lotsArr.length) return 0;
+                let t = 0;
+                for (let i = 0; i < lotsArr.length; i++) {
+                    const l = lotsArr[i] || {};
+                    const q = toNum(l.qty);
+                    if (q > 0) t = round6(t + q);
+                }
+                return round6(t);
+            } catch (e) {
+                return 0;
+            }
+        }
+
+        function allocateLotsGreedyFromPool(lotsPool, qtyNeeded) {
+            // lotsPool is MUTATED (consumes qty from lots). Returns allocated lots (qtys sum to qtyNeeded, capped).
+            const out = [];
+            try {
+                let remaining = round6(toNum(qtyNeeded));
+                if (!(remaining > 0)) return out;
+                if (!Array.isArray(lotsPool) || !lotsPool.length) return out;
+
+                for (let i = 0; i < lotsPool.length && remaining > 0; i++) {
+                    const l = lotsPool[i];
+                    if (!l) continue;
+                    const avail = round6(toNum(l.qty));
+                    if (!(avail > 0)) continue;
+
+                    const take = round6(Math.min(avail, remaining));
+                    if (take <= 0) continue;
+
+                    out.push(Object.assign({}, l, { qty: take }));
+                    l.qty = round6(avail - take); // consume
+                    remaining = round6(remaining - take);
+                }
+
+                return out;
+            } catch (e) {
+                return out;
+            }
+        }
+
         function prorateLotsForAllocation(lotsArr, allocQty, totalQty) {
             try {
                 if (!Array.isArray(lotsArr) || !lotsArr.length) return [];
@@ -560,37 +629,102 @@ define(['./COS_LIB_repack', 'N/record','N/search','N/log','N/url','N/ui/serverWi
             const totalQty = toNum(srcQty);
             if (!(totalQty > 0)) return;
 
-            // Allocate source QTY across outputs by output shares.
-            // Use higher precision during allocation to reduce 0-qty rounding artifacts that can drop component lines.
-            // Final qty is still stored as a number (NetSuite will apply its own precision rules based on the item's unit type).
+            // PURCHASE: unchanged (no lots)
+            if (isPurchase) {
+                let runningQty = 0;
+                outIds.forEach((outId, idx) => {
+                    const isLast = (idx === outIds.length - 1);
+                    let allocQty = 0;
+                    if (isLast) {
+                        allocQty = round9(totalQty - runningQty);
+                    } else {
+                        allocQty = round9(totalQty * (shares[outId] || 0));
+                    }
+                    allocQty = round9(allocQty);
+                    runningQty = round9(runningQty + allocQty);
+                    if (!(allocQty > 0)) return;
+                    allocationsPoByOut[outId].push({
+                        po_item_internalid: Number(srcId),
+                        po_item_quantity: allocQty
+                    });
+                });
+                return;
+            }
+
+            // INVENTORY: lots represent SELECTED LOT qty, which may be less than totalQty (Input Step row qty).
+            const selectedLots = Array.isArray(srcLotsArr) ? JSON.parse(JSON.stringify(srcLotsArr)) : [];
+            const selectedTotal = sumLotsQty(selectedLots);
+
+            // Decide allocation basis (A or B)
+            const baseTotalQty = (ALLOCATE_MODE === ALLOCATE_BASED_ON.SELECTED_LOT_QTY) ? selectedTotal : totalQty;
+            if (!(baseTotalQty > 0)) return;
+
+            // For GREEDY lot split, maintain a mutable pool of lots to consume across outputs
+            const lotsPool = (LOT_SPLIT_STRATEGY === LOT_SPLIT_MODE.GREEDY)
+                ? (Array.isArray(selectedLots) ? selectedLots : [])
+                : null;
+
+            // Allocate base qty across outputs by output shares
             let runningQty = 0;
 
             outIds.forEach((outId, idx) => {
                 const isLast = (idx === outIds.length - 1);
 
                 let allocQty = 0;
-
                 if (isLast) {
-                    allocQty = round9(totalQty - runningQty);
+                    allocQty = round9(baseTotalQty - runningQty);
                 } else {
-                    allocQty = round9(totalQty * (shares[outId] || 0));
+                    allocQty = round9(baseTotalQty * (shares[outId] || 0));
                 }
-
                 allocQty = round9(allocQty);
-                if (allocQty <= 0) return;
-
                 runningQty = round9(runningQty + allocQty);
 
-                if (isPurchase) {
-                    allocationsPoByOut[outId].push({
-                        po_item_internalid: Number(srcId),
-                        po_item_quantity: allocQty
-                    });
-                } else {
+                if (!(allocQty > 0)) return;
+
+                // Determine how much of THIS allocation is LOT-ASSIGNED
+                let assignedQty = 0;
+
+                if (selectedTotal > 0) {
+                    if (LOT_SPLIT_STRATEGY === LOT_SPLIT_MODE.GREEDY) {
+                        // Greedy: consume selected lot qty from the pool per output
+                        // assignedQty is capped by remaining lot pool
+                        const remainingPoolQty = sumLotsQty(lotsPool);
+                        assignedQty = round9(Math.min(allocQty, remainingPoolQty));
+                    } else {
+                        // Proportional: split selectedTotal by the allocation share of baseTotalQty
+                        assignedQty = round9(selectedTotal * (toNum(allocQty) / toNum(baseTotalQty)));
+                        assignedQty = round9(Math.min(assignedQty, allocQty));
+                    }
+                }
+
+                assignedQty = round9(assignedQty);
+                const unassignedQty = round9(allocQty - assignedQty);
+
+                // Build lots array for the assigned portion
+                let lotsForThisOut = [];
+                if (assignedQty > 0) {
+                    if (LOT_SPLIT_STRATEGY === LOT_SPLIT_MODE.GREEDY) {
+                        lotsForThisOut = allocateLotsGreedyFromPool(lotsPool, assignedQty);
+                    } else {
+                        lotsForThisOut = prorateLotsForAllocation(selectedLots, assignedQty, selectedTotal);
+                    }
+                }
+
+                // Push ASSIGNED line (with inventorydetail)
+                if (assignedQty > 0) {
                     allocationsInvByOut[outId].push({
                         input_item_internalid: Number(srcId),
-                        input_item_quantity: allocQty,
-                        input_item_lots: prorateLotsForAllocation((Array.isArray(srcLotsArr) ? srcLotsArr : []), allocQty, totalQty)
+                        input_item_quantity: assignedQty,
+                        input_item_lots: lotsForThisOut
+                    });
+                }
+
+                // Push UNASSIGNED line (blank inventorydetail) — only meaningful in Option A (or when selectedTotal < baseTotalQty)
+                if (unassignedQty > 0) {
+                    allocationsInvByOut[outId].push({
+                        input_item_internalid: Number(srcId),
+                        input_item_quantity: unassignedQty,
+                        input_item_lots: [] // explicitly blank
                     });
                 }
             });
@@ -890,6 +1024,51 @@ define(['./COS_LIB_repack', 'N/record','N/search','N/log','N/url','N/ui/serverWi
                     purchases.forEach(p => { if (p && p.id) itemIds.push(String(p.id)); });
 
                     const convMap = fetchConversionMap(itemIds);
+
+
+
+                    function sumLotsQty(lotsArr) {
+                        try {
+                            if (!Array.isArray(lotsArr) || !lotsArr.length) return 0;
+                            let t = 0;
+                            for (let i = 0; i < lotsArr.length; i++) {
+                                const l = lotsArr[i] || {};
+                                const q = toNum(l.qty);
+                                if (q > 0) t = round6(t + q);
+                            }
+                            return round6(t);
+                        } catch (e) {
+                            return 0;
+                        }
+                    }
+
+                    function allocateLotsGreedyFromPool(lotsPool, qtyNeeded) {
+                        // lotsPool is MUTATED (consumes qty from lots). Returns allocated lots (qtys sum to qtyNeeded, capped).
+                        const out = [];
+                        try {
+                            let remaining = round6(toNum(qtyNeeded));
+                            if (!(remaining > 0)) return out;
+                            if (!Array.isArray(lotsPool) || !lotsPool.length) return out;
+
+                            for (let i = 0; i < lotsPool.length && remaining > 0; i++) {
+                                const l = lotsPool[i];
+                                if (!l) continue;
+                                const avail = round6(toNum(l.qty));
+                                if (!(avail > 0)) continue;
+
+                                const take = round6(Math.min(avail, remaining));
+                                if (take <= 0) continue;
+
+                                out.push(Object.assign({}, l, { qty: take }));
+                                l.qty = round6(avail - take); // consume
+                                remaining = round6(remaining - take);
+                            }
+
+                            return out;
+                        } catch (e) {
+                            return out;
+                        }
+                    }
 
                     function prorateLotsForAllocation(lotsArr, allocQty, totalQty) {
                         try {
@@ -1407,6 +1586,7 @@ define(['./COS_LIB_repack', 'N/record','N/search','N/log','N/url','N/ui/serverWi
                             tryPopulateLineInventoryDetail(lotsArr, { ...contextInfo, itemId: itemIdStr, qty });
 
                             woRec.commitLine({ sublistId: 'item' });
+                            try { delete lineByItemId[itemIdStr]; } catch (_e) {}
                         } else {
                             woRec.selectNewLine({ sublistId: 'item' });
                             woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'item', value: Number(inp.input_item_internalid) });
@@ -1423,6 +1603,7 @@ define(['./COS_LIB_repack', 'N/record','N/search','N/log','N/url','N/ui/serverWi
                             tryPopulateLineInventoryDetail(lotsArr, { ...contextInfo, itemId: itemIdStr, qty });
 
                             woRec.commitLine({ sublistId: 'item' });
+                            try { delete lineByItemId[itemIdStr]; } catch (_e) {}
                         }
                     } catch (lineErr) {
                         // If item sublist isn't editable (BOM-driven), we still allow WO creation and log the issue.
@@ -1457,6 +1638,7 @@ define(['./COS_LIB_repack', 'N/record','N/search','N/log','N/url','N/ui/serverWi
 
                         // NOTE: PO components do NOT assign inventory detail here.
                         woRec.commitLine({ sublistId: 'item' });
+                        try { delete lineByItemId[itemIdStr]; } catch (_e) {}
                     } catch (poLineErr) {
                         try {
                             log.error({
