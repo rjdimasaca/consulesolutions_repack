@@ -8,29 +8,21 @@
  * - scriptId: customscript_cos_sl_repack_createwo
  * - deployId: customdeploy_cos_sl_repack_createwo
  */
-define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, search, log, url, serverWidget) => {
+define(['./COS_LIB_repack', 'N/record','N/search','N/log','N/url','N/ui/serverWidget'], (COS_LIB, record, search, log, url, serverWidget) => {
 
 
-    const REPACK_STATUS_FIELDID = 'custrecord_cos_rep_status';
-    const REPACK_STATUS_DRAFT = '1';
-    const REPACK_STATUS_WO_IN_PROGRESS = '2';
-    const REPACK_STATUS_WO_CREATED = '3';
+    const REPACK_STATUS_FIELDID = COS_LIB.CONST.FIELD.STATUS;
+    const REPACK_STATUS_DRAFT = COS_LIB.CONST.STATUS.DRAFT;
+    const REPACK_STATUS_WO_IN_PROGRESS = COS_LIB.CONST.STATUS.WO_IN_PROGRESS;
+    const REPACK_STATUS_WO_CREATED = COS_LIB.CONST.STATUS.WO_CREATED;
 
-    // const REPACK_STATUS_DRAFT = '1';
+    // const REPACK_STATUS_DRAFT = COS_LIB.CONST.STATUS.DRAFT;
     // const REPACK_STATUS_WO_CREATED = '2';
 
     // Optional helper fields (safe to ignore if not present in your account)
-    const REPACK_CREATED_WO_IDS_FIELDID = 'custrecord_cos_rep_created_wo_ids';
-    const REPACK_CREATED_WO_DATE_FIELDID = 'custrecord_cos_rep_created_wo_date';
-
-    function htmlEscape(s){
-        return String(s||'')
-            .replace(/&/g,'&amp;')
-            .replace(/</g,'&lt;')
-            .replace(/>/g,'&gt;')
-            .replace(/"/g,'&quot;')
-            .replace(/'/g,'&#39;');
-    }
+    const REPACK_CREATED_WO_IDS_FIELDID = COS_LIB.CONST.FIELD.CREATED_WO_IDS;
+    const REPACK_CREATED_WO_DATE_FIELDID = COS_LIB.CONST.FIELD.CREATED_WO_DATE;
+    const htmlEscape = COS_LIB.htmlEscape;
 
     function renderResultPage(context, title, bodyHtml) {
         const form = serverWidget.createForm({ title, hideNavBar : true });
@@ -51,7 +43,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
                 filters: [
                     ['mainline','is','T'],
                     'and',
-                    ['custbody_cos_createdfromrepack','anyof', String(repackId)]
+                    [COS_LIB.CONST.BODY.CREATED_FROM_REPACK,'anyof', String(repackId)]
                 ],
                 columns: [
                     search.createColumn({ name:'internalid' }),
@@ -80,7 +72,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
                 filters: [
                     ['mainline','is','T'],
                     'and',
-                    ['custbody_cos_createdfromrepack','anyof', String(repackId)]
+                    [COS_LIB.CONST.BODY.CREATED_FROM_REPACK,'anyof', String(repackId)]
                 ],
                 columns: [
                     search.createColumn({ name:'internalid' }),
@@ -137,7 +129,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
     function buildPurchaseLinesFromSummary(repackRec) {
         // Repack PO section is stored in the summary payload as summary.purchase (or variants).
         const rawSummary = (function(){
-            try { return repackRec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''; } catch (_e) {}
+            try { return repackRec.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }) || ''; } catch (_e) {}
             return '';
         })();
 
@@ -146,7 +138,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
             : (Array.isArray(summary.purchaseOrder) ? summary.purchaseOrder
                 : (Array.isArray(summary.po) ? summary.po : []));
 
-        const DEFAULT_VENDOR_ID = '621';
+        const DEFAULT_VENDOR_ID = COS_LIB.CONST.DEFAULT.PO_VENDOR_ID;
 
         // Normalize lines from UI payload (vendorId should already be provided by the UI)
         const lines = [];
@@ -171,7 +163,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
     }
 
     function createPurchaseOrdersFromLines(poLines, subsidiary, location, repackId) {
-        const DEFAULT_VENDOR_ID = '621';
+        const DEFAULT_VENDOR_ID = COS_LIB.CONST.DEFAULT.PO_VENDOR_ID;
 
         const results = [];
         const lines = Array.isArray(poLines) ? poLines : [];
@@ -199,7 +191,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
                     try { poRec.setValue({ fieldId: 'subsidiary', value: Number(subsidiary) }); } catch (_e) {}
                 }
                 if (repackId) {
-                    try { poRec.setValue({ fieldId: 'custbody_cos_createdfromrepack', value: Number(repackId) }); } catch (_e) {}
+                    try { poRec.setValue({ fieldId: COS_LIB.CONST.BODY.CREATED_FROM_REPACK, value: Number(repackId) }); } catch (_e) {}
                 }
 
                 // Lines
@@ -354,7 +346,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
 
         // Validate against summary payload on the record
         const rawSummary = (function(){
-            try { return repackRec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''; } catch (_e) {}
+            try { return repackRec.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }) || ''; } catch (_e) {}
             return '';
         })();
 
@@ -476,12 +468,12 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
         // Read UI payloads (custpage fields) – available on submit context
         const rawSummary = firstNonEmptyString(
             newRecord.getValue({ fieldId: 'custpage_cos_summary_payload' }),
-            newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }),
+            newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }),
             ''
         );
         const rawLots = firstNonEmptyString(
             newRecord.getValue({ fieldId: 'custpage_cos_input_lots_payload' }),
-            newRecord.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }),
+            newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD }),
             ''
         );
 
@@ -870,11 +862,11 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
             // If custpage fields are unavailable (csv/web services), fall back to existing stored payloads
             const summaryStr = firstNonEmptyString(
                 rawSummary,
-                rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }),
+                rec.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }),
                 ''
             );const lotsStr = firstNonEmptyString(
                 rawLots,
-                rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }),
+                rec.getValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD }),
                 ''
             );const summary = safeParseJson(summaryStr) || {};
             const lotsMap = safeParseJson(lotsStr) || {};
@@ -1058,10 +1050,10 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
 
             // Persist into real record fields
             if (finalSummaryStr !== null && finalSummaryStr !== undefined && String(finalSummaryStr).trim().length) {
-                try { rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: finalSummaryStr }); } catch (_e) {}
+                try { rec.setValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD, value: finalSummaryStr }); } catch (_e) {}
             }
             if (lotsStr !== null && lotsStr !== undefined && String(lotsStr).trim().length) {
-                try { rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: lotsStr }); } catch (_e) {}
+                try { rec.setValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD, value: lotsStr }); } catch (_e) {}
             }
 
             // Helpful debug marker (log final output)
@@ -1138,7 +1130,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
                 {
                     try
                     {
-                        woRec.setValue({ fieldId: 'custbody_cos_createdfromrepack', value: Number(repackId) });
+                        woRec.setValue({ fieldId: COS_LIB.CONST.BODY.CREATED_FROM_REPACK, value: Number(repackId) });
                     }
                     catch(e)
                     {
@@ -1282,29 +1274,40 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
 
                         let assignedLines = 0;
 
-                        // Ensure lots sum matches component qty (best effort)
-                        const targetQty = Number((_ctx && _ctx.qty) || 0);
-                        if (targetQty > 0) {
-                            try {
-                                let sum = 0;
-                                for (let i = 0; i < lotsArr.length; i++) sum += Number((lotsArr[i] && lotsArr[i].qty) || 0);
-                                const diff = Math.round((targetQty - sum) * 1000000) / 1000000;
-                                if (Math.abs(diff) > 0.000001) {
-                                    for (let j = lotsArr.length - 1; j >= 0; j--) {
-                                        const q0 = Number((lotsArr[j] && lotsArr[j].qty) || 0);
-                                        if (q0 > 0) {
-                                            lotsArr[j].qty = Math.round((q0 + diff) * 1000000) / 1000000;
-                                            break;
-                                        }
-                                    }
-                                    try {
-                                        log.debug({ title: 'COS Repack: lot qty adjusted to match component qty', details: JSON.stringify({ ..._ctx, targetQty, sumBefore: sum, diff }) });
-                                    } catch (_e) {}
+                        // Ensure inventory detail assignment totals do NOT exceed component qty.
+                        // NetSuite tends to validate inventory detail quantities with ~5 decimal precision.
+                        const targetQtyRaw = Number((_ctx && _ctx.qty) || 0);
+                        const targetQty = round5(targetQtyRaw);
+
+                        // Normalize lots array to 5dp and cap by remaining qty to avoid “total inventory detail quantity cannot be greater than X”
+                        const normLots = [];
+                        let remaining = targetQty;
+
+                        if (Array.isArray(lotsArr)) {
+                            for (let i = 0; i < lotsArr.length; i++) {
+                                const l0 = lotsArr[i];
+                                if (!l0) continue;
+                                const q0 = round5(Number(l0.qty || 0));
+                                if (!(q0 > 0)) continue;
+
+                                const q = (remaining > 0) ? Math.min(q0, remaining) : 0;
+                                const qCap = round5(q);
+
+                                if (qCap > 0) {
+                                    normLots.push({ ...l0, qty: qCap });
+                                    remaining = round5(remaining - qCap);
                                 }
-                            } catch (_e) {}
+                            }
                         }
 
-                        lotsArr.forEach((l, idx) => {
+                        // If we still have a tiny remaining amount (rounding), add it to the last line (but never exceed target).
+                        if (targetQty > 0 && normLots.length && remaining > 0) {
+                            const lastIdx = normLots.length - 1;
+                            normLots[lastIdx].qty = round5(normLots[lastIdx].qty + remaining);
+                            remaining = 0;
+                        }
+
+                        normLots.forEach((l, idx) => {
                             if (!l) return;
                             const q = Number(l.qty || 0);
                             if (!(q > 0)) return;
@@ -1398,7 +1401,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
                             try {
                                 log.debug({ title: 'COS Repack: setting component qty', details: JSON.stringify({ ...contextInfo, itemId: itemIdStr, qty, lineMode: (lineByItemId[itemIdStr] != null) ? 'existing' : 'new' }) });
                             } catch (_e) {}
-                            woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
+                            woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: round5(qty) });
 
                             // Track lots on the component line (best-effort)
                             tryPopulateLineInventoryDetail(lotsArr, { ...contextInfo, itemId: itemIdStr, qty });
@@ -1415,7 +1418,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
                             try {
                                 log.debug({ title: 'COS Repack: setting component qty', details: JSON.stringify({ ...contextInfo, itemId: itemIdStr, qty, lineMode: (lineByItemId[itemIdStr] != null) ? 'existing' : 'new' }) });
                             } catch (_e) {}
-                            woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
+                            woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: round5(qty) });
 
                             tryPopulateLineInventoryDetail(lotsArr, { ...contextInfo, itemId: itemIdStr, qty });
 
@@ -1450,7 +1453,7 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
                         try {
                             log.debug({ title: 'COS Repack: setting PO component qty', details: JSON.stringify({ ...contextInfo, itemId: String(inp.item_internalid), qty }) });
                         } catch (_e) {}
-                        woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qty });
+                        woRec.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: round5(qty) });
 
                         // NOTE: PO components do NOT assign inventory detail here.
                         woRec.commitLine({ sublistId: 'item' });
@@ -1524,6 +1527,15 @@ define(['N/record','N/search','N/log','N/url','N/ui/serverWidget'], (record, sea
         if (!isFinite(x)) return 0;
         return Math.round(x * 1e6) / 1e6;
     }
+
+    // Quantity precision in NetSuite commonly behaves like 5 decimals for inventory detail quantities
+    const QTY_PREC = 100000; // 10^5
+    function round5(n){
+        const x = Number(n || 0);
+        if (!isFinite(x)) return 0;
+        return Math.round(x * QTY_PREC) / QTY_PREC;
+    }
+
 
     function round9(n) {
         const x = Number(n);

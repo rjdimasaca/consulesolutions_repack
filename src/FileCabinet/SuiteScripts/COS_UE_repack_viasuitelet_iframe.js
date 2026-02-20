@@ -3,24 +3,24 @@
  * @NScriptType UserEventScript
  */
 
-define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'], (serverWidget, url, search, log, record, message) => {
+define(['./COS_LIB_repack', 'N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'], (COS_LIB, serverWidget, url, search, log, record, message) => {
 
     // Suitelet used by the "Print Repack" button (VIEW mode)
     // NOTE: replace these IDs if your Script/Deployment IDs differ in your account.
-    const PRINT_REPACK_SL_SCRIPTID = 'customscript_cos_sl_repack_print';
-    const PRINT_REPACK_SL_DEPLOYID = 'customdeploy_cos_sl_repack_print';
+    const PRINT_REPACK_SL_SCRIPTID = COS_LIB.CONST.SCRIPT.PRINT_REPACK.scriptId;
+    const PRINT_REPACK_SL_DEPLOYID = COS_LIB.CONST.SCRIPT.PRINT_REPACK.deployId;
 
 
     // Suitelet used by the "Create Work Orders" button (VIEW mode)
     // NOTE: replace these IDs if your Script/Deployment IDs differ in your account.
-    const CREATE_WO_SL_SCRIPTID = 'customscript_cos_sl_repack_actions';
-    const CREATE_WO_SL_DEPLOYID = 'customdeploy_cos_sl_repack_actions';
+    const CREATE_WO_SL_SCRIPTID = COS_LIB.CONST.SCRIPT.CREATE_WO.scriptId;
+    const CREATE_WO_SL_DEPLOYID = COS_LIB.CONST.SCRIPT.CREATE_WO.deployId;
 
     // Repack status field + values
-    const REPACK_STATUS_FIELDID = 'custrecord_cos_rep_status';
-    const REPACK_STATUS_DRAFT = '1';
-    const REPACK_STATUS_WO_IN_PROGRESS = '2';
-    const REPACK_STATUS_WO_CREATED = '3';
+    const REPACK_STATUS_FIELDID = COS_LIB.CONST.FIELD.STATUS;
+    const REPACK_STATUS_DRAFT = COS_LIB.CONST.STATUS.DRAFT;
+    const REPACK_STATUS_WO_IN_PROGRESS = COS_LIB.CONST.STATUS.WO_IN_PROGRESS;
+    const REPACK_STATUS_WO_CREATED = COS_LIB.CONST.STATUS.WO_CREATED;
 
     const beforeLoad = (scriptContext) => {
         const { form, type } = scriptContext;
@@ -49,12 +49,12 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
 
             if (type === scriptContext.UserEventType.EDIT && repStatusStrLock && repStatusStrLock !== REPACK_STATUS_DRAFT) {
                 const lockFieldIds = [
-                    'custrecord_cos_rep_subsidiary',
-                    'custrecord_cos_rep_location',
-                    'custrecord_cos_rep_status',
-                    'custrecord_cos_rep_date',
-                    'custrecord_cos_rep_species',
-                    'custrecord_cos_rep_wip'
+                    COS_LIB.CONST.FIELD.SUBSIDIARY,
+                    COS_LIB.CONST.FIELD.LOCATION,
+                    COS_LIB.CONST.FIELD.STATUS,
+                    COS_LIB.CONST.FIELD.DATE,
+                    COS_LIB.CONST.FIELD.SPECIES,
+                    COS_LIB.CONST.FIELD.WIP
                 ];
 
                 lockFieldIds.forEach((fid) => {
@@ -168,8 +168,8 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
 
             let summaryStr = '';
             let lotsStr = '';
-            try { summaryStr = rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''; } catch (e) {}
-            try { lotsStr = rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || ''; } catch (e) {}
+            try { summaryStr = rec.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }) || ''; } catch (e) {}
+            try { lotsStr = rec.getValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD }) || ''; } catch (e) {}
 
             const htmlField = form.addField({
                 id: 'custpage_cos_view_summary_html',
@@ -233,7 +233,7 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
 </style>
 
 <script>
-(function(){
+(function(COS_LIB, ){
   var SUMMARY_RAW = ${JSON.stringify(summaryStr || '')};
   var LOTS_RAW = ${JSON.stringify(lotsStr || '')};
 
@@ -533,8 +533,8 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
 
                 let summaryStr = '';
                 let lotsStr = '';
-                try { summaryStr = rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || ''; } catch (e) {}
-                try { lotsStr = rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || ''; } catch (e) {}
+                try { summaryStr = rec.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }) || ''; } catch (e) {}
+                try { lotsStr = rec.getValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD }) || ''; } catch (e) {}
 
                 const htmlField = form.addField({
                     id: 'custpage_cos_view_summary_html',
@@ -929,12 +929,12 @@ define(['N/ui/serverWidget','N/url','N/search','N/log','N/record','N/ui/message'
         // EDIT mode: prefill hidden custpage payloads from persisted record fields
         if (type === scriptContext.UserEventType.EDIT) {
             try {
-                const savedSummary = scriptContext.newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '';
+                const savedSummary = scriptContext.newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }) || '';
                 if (savedSummary) summaryPayload.defaultValue = String(savedSummary);
             } catch (e) {}
 
             try {
-                const savedLots = scriptContext.newRecord.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '';
+                const savedLots = scriptContext.newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD }) || '';
                 if (savedLots) inputLotsPayload.defaultValue = String(savedLots);
             } catch (e) {}
         }
@@ -2808,10 +2808,10 @@ function showStep2(){
     function buildWorkordersPayload(newRecord) {
         // Read UI payloads (custpage fields) – available on submit context
         const rawSummary = newRecord.getValue({ fieldId: 'custpage_cos_summary_payload' })
-            || newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' })
+            || newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD })
             || '';
         const rawLots = newRecord.getValue({ fieldId: 'custpage_cos_input_lots_payload' })
-            || newRecord.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' })
+            || newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD })
             || '';
 
         const summary = safeParseJson(rawSummary) || {};
@@ -2821,8 +2821,8 @@ function showStep2(){
         const inputs = Array.isArray(summary.inputs) ? summary.inputs : [];
         const purchase = Array.isArray(summary.purchase) ? summary.purchase : [];
 
-        const subsidiary = newRecord.getValue({ fieldId: 'custrecord_cos_rep_subsidiary' });
-        const location = newRecord.getValue({ fieldId: 'custrecord_cos_rep_location' });
+        const subsidiary = newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.SUBSIDIARY });
+        const location = newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.LOCATION });
 
         // Fetch conversions for any item we may touch
         const itemIds = [];
@@ -3197,8 +3197,8 @@ function showStep2(){
 
             // Preserve previously-saved payloads when this submit context does not carry custpage values
             // (e.g., Suitelet record.submitFields / xedit). This prevents Step 1/Step 2 from losing hydration data.
-            const storedSummary = String(rec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '');
-            const storedLots = String(rec.getValue({ fieldId: 'custrecord_cos_rep_input_lots_payload' }) || '');
+            const storedSummary = String(rec.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }) || '');
+            const storedLots = String(rec.getValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD }) || '');
 
             let summaryStr = '';
             try { summaryStr = (rawSummary !== null && rawSummary !== undefined) ? String(rawSummary || '') : ''; } catch (_e) { summaryStr = ''; }
@@ -3219,9 +3219,9 @@ function showStep2(){
                 const purchases = Array.isArray(summary.purchase) ? summary.purchase : (Array.isArray(summary.purchaseOrder) ? summary.purchaseOrder : []);
 
                 if (outputs.length || inputs.length || purchases.length) {
-                    const subsidiary = rec.getValue({ fieldId: 'custrecord_cos_rep_subsidiary' }) || '';
-                    const location = rec.getValue({ fieldId: 'custrecord_cos_rep_location' }) || '';
-                    const species = rec.getValue({ fieldId: 'custrecord_cos_rep_species' }) || '';
+                    const subsidiary = rec.getValue({ fieldId: COS_LIB.CONST.FIELD.SUBSIDIARY }) || '';
+                    const location = rec.getValue({ fieldId: COS_LIB.CONST.FIELD.LOCATION }) || '';
+                    const species = rec.getValue({ fieldId: COS_LIB.CONST.FIELD.SPECIES }) || '';
 
                     // Gather itemIds for conversion lookup
                     const itemIds = [];
@@ -3391,11 +3391,11 @@ function showStep2(){
             // Persist into real record fields (never blank-out stored payloads)
             const finalSummaryTrim = String(finalSummaryStr || '').trim();
             if (finalSummaryTrim) {
-                try { rec.setValue({ fieldId: 'custrecord_cos_rep_summary_payload', value: finalSummaryStr }); } catch (_e) {}
+                try { rec.setValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD, value: finalSummaryStr }); } catch (_e) {}
             }
             const lotsTrim = String(lotsStr || '').trim();
             if (lotsTrim) {
-                try { rec.setValue({ fieldId: 'custrecord_cos_rep_input_lots_payload', value: lotsStr }); } catch (_e) {}
+                try { rec.setValue({ fieldId: COS_LIB.CONST.FIELD.INPUT_LOTS_PAYLOAD, value: lotsStr }); } catch (_e) {}
             }
 
             // Helpful debug marker (log final output)
@@ -3421,13 +3421,13 @@ function showStep2(){
             const payload = buildWorkordersPayload(newRecord);
 
             // Repack flag: if checked, mark created Work Orders as WIP
-            const repackMarkWipRaw = newRecord.getValue({ fieldId: 'custrecord_cos_rep_wip' });
+            const repackMarkWipRaw = newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.WIP });
             const repackMarkWip = (repackMarkWipRaw === true || repackMarkWipRaw === 'T' || repackMarkWipRaw === 'true');
             try { log.debug({ title: 'COS Repack: repackMarkWip', details: String(repackMarkWipRaw) + ' => ' + String(repackMarkWip) }); } catch (_e) {}
 
             // Validate against the submitted summary payload (shape + reconciliation checks)
             const rawSummary = newRecord.getValue({ fieldId: 'custpage_cos_summary_payload' })
-                || newRecord.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' })
+                || newRecord.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD })
                 || '';
             const validationErrors = validateWorkordersPayload(payload, rawSummary);
 

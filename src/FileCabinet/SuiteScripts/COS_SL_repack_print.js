@@ -1,23 +1,14 @@
 /**
- * @NApiVersion 2.x
+ * @NApiVersion 2.1
  * @NScriptType Suitelet
  */
-define(['N/record', 'N/render', 'N/search'], function (record, render, search) {
+define(['./COS_LIB_repack','N/record','N/render','N/search'], function (COS_LIB, record, render, search) {
 
-    function xmlEscape(s) {
-        if (s === null || s === undefined) return '';
-        return String(s)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&apos;');
-    }
+    var xmlEscape = COS_LIB.xmlEscape;
 
-    function safeNum(n) {
-        var x = parseFloat(n);
-        return isFinite(x) ? x : 0;
-    }
+
+    function safeNum(n) { return COS_LIB.toNum(n); }
+
 
     function fmt(n, decimals) {
         var x = safeNum(n);
@@ -25,10 +16,8 @@ define(['N/record', 'N/render', 'N/search'], function (record, render, search) {
         return x.toFixed(d);
     }
 
-    function parseJsonMaybe(s) {
-        if (!s) return null;
-        try { return JSON.parse(s); } catch (e) { return null; }
-    }
+    function parseJsonMaybe(s) { return COS_LIB.safeParseJson(s); }
+
 
     function getAllocForOut(allocMap, outItemId) {
         // allocMap shape expected:
@@ -273,12 +262,12 @@ define(['N/record', 'N/render', 'N/search'], function (record, render, search) {
         });
 
         // Header fields (TEXT equivalent)
-        var subsTxt = repRec.getText({ fieldId: 'custrecord_cos_rep_subsidiary' }) || '';
-        var locTxt = repRec.getText({ fieldId: 'custrecord_cos_rep_location' }) || '';
-        var speciesTxt = repRec.getText({ fieldId: 'custrecord_cos_rep_species' }) || '';
+        var subsTxt = repRec.getText({ fieldId: COS_LIB.CONST.FIELD.SUBSIDIARY }) || '';
+        var locTxt = repRec.getText({ fieldId: COS_LIB.CONST.FIELD.LOCATION }) || '';
+        var speciesTxt = repRec.getText({ fieldId: COS_LIB.CONST.FIELD.SPECIES }) || '';
 
         // Summary payload
-        var summaryStr = repRec.getValue({ fieldId: 'custrecord_cos_rep_summary_payload' }) || '';
+        var summaryStr = repRec.getValue({ fieldId: COS_LIB.CONST.FIELD.SUMMARY_PAYLOAD }) || '';
         var summary = parseJsonMaybe(summaryStr) || {};
 
         var headerHtml = buildHeaderSection(subsTxt, locTxt, speciesTxt);

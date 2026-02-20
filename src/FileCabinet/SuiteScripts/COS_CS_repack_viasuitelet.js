@@ -2,10 +2,10 @@
  * @NApiVersion 2.1
  * @NScriptType ClientScript
  */
-define(['N/currentRecord', 'N/search', 'N/record'], (currentRecord, search, record) => {
+define(['./COS_LIB_repack','N/currentRecord', 'N/search', 'N/record'], (COS_LIB, currentRecord, search, record) => {
 
-    const FIELD_SPECIES  = 'custrecord_cos_rep_species';
-    const FIELD_LOCATION = 'custrecord_cos_rep_location';
+    const FIELD_SPECIES  = COS_LIB.CONST.FIELD.SPECIES;
+    const FIELD_LOCATION = COS_LIB.CONST.FIELD.LOCATION;
 
 
     // SO-only committed quantity (sum of transaction line quantitycommitted for Sales Orders)
@@ -413,7 +413,7 @@ define(['N/currentRecord', 'N/search', 'N/record'], (currentRecord, search, reco
                     type: recType,
                     id: recId,
                     values: {
-                        custrecord_cos_rep_status: '2'
+                        [COS_LIB.CONST.FIELD.STATUS]: COS_LIB.CONST.STATUS.WO_IN_PROGRESS
                     },
                     options: {
                         enableSourcing: false,

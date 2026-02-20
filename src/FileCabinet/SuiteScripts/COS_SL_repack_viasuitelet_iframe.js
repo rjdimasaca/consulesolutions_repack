@@ -4,7 +4,7 @@
  *
  * REFERENCES: https://suiteanswers.custhelp.com/app/answers/detail/a_id/78252/kw/78252
  */
-define(['N/search'], function (search) {
+define(['./COS_LIB_repack', 'N/search'], function (COS_LIB, search) {
 
     function onRequest(context) {
         var req = context.request;
@@ -76,11 +76,7 @@ define(['N/search'], function (search) {
         return out;
     }
 
-    function escapeHtml(s) {
-        return String(s || '').replace(/[&<>"']/g, function (c) {
-            return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
-        });
-    }
+    var escapeHtml = COS_LIB.htmlEscape;
 
     function buildErrorHtml(msg) {
         return ''
